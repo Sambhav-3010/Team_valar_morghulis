@@ -18,6 +18,12 @@ import {
     getMyReviews,
     getMyStats,
 } from '../controllers/userController';
+import {
+    getRepoCommitDetails,
+    getRepoWorkflowRuns,
+    getRepoPRDetails,
+    getRepoIssueDetails,
+} from '../controllers/dataController';
 
 const router = Router();
 
@@ -49,5 +55,11 @@ router.get('/api/user/orgs/:org/repos', getOrgRepos);
 router.get('/api/user/events', getMyEvents);
 router.get('/api/user/reviews', getMyReviews);
 router.get('/api/user/stats', getMyStats);
+
+// Repository Data Collection Routes
+router.get('/api/repos/:owner/:repo/commits/:ref', getRepoCommitDetails);
+router.get('/api/repos/:owner/:repo/actions/runs', getRepoWorkflowRuns);
+router.get('/api/repos/:owner/:repo/pulls', getRepoPRDetails);
+router.get('/api/repos/:owner/:repo/issues', getRepoIssueDetails);
 
 export default router;
