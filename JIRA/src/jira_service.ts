@@ -6,7 +6,7 @@ const CLIENT_SECRET = process.env.CLIENT_SECRET!;
 const REDIRECT_URI = process.env.REDIRECT_URI!;
 
 let accessToken = "";
-let cloudId = "";
+let resources: { id: string, name: string }[] = [];
 
 /*
 ==================================
@@ -56,7 +56,7 @@ export const jiraCallback = async (req: Request, res: Response) => {
         console.log("accessToken received", accessToken);
 
         // Get cloudid
-        const cloudResponse = await axios.get<{ id: string }[]>(
+        const cloudResponse = await axios.get<{ id: string, name: string }[]>(
             "https://api.atlassian.com/oauth/token/accessible-resources",
             {
                 headers: {
@@ -67,17 +67,15 @@ export const jiraCallback = async (req: Request, res: Response) => {
 
         console.log("Available Resources:", JSON.stringify(cloudResponse.data, null, 2));
 
-        // Find the first resource that has 'jira' scopes or just pick the first one if unsure
-        // For now, let's stick to index 0 but with better logging. 
-        // If the user sees multiple, we can filter by name or scope.
         if (cloudResponse.data.length === 0) {
             throw new Error("No accessible resources found.");
         }
-        cloudId = cloudResponse.data[0].id;
-        console.log("Selected cloudId:", cloudId);
-        console.log("cloudId received", cloudId);
 
-        res.send("Jira Connected Successfully!");
+        // Store ALL resources
+        resources = cloudResponse.data;
+        console.log(`Stored ${resources.length} resources.`);
+
+        res.send("Jira Connected Successfully! You can now fetch analytics.");
 
     } catch (error) {
 
@@ -97,99 +95,220 @@ export const jiraCallback = async (req: Request, res: Response) => {
 export const fetchJiraAnalytics = async (req: Request, res: Response) => {
 
 
-    if (!accessToken || !cloudId) {
+    if (!accessToken || resources.length === 0) {
         res.status(401).send("Not connected to Jira. Please visit /connect first.");
         return;
     }
 
     try {
+        const allAnalytics: any[] = [];
 
-        const searchResponse = await axios.post<{ issues: { id: string, key: string }[] }>(
-            `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/search/jql`,
-            {
-                jql: "created >= -30d order by created DESC",
-            },
-            {
-                headers: {
-                    Authorization: `Bearer ${accessToken}`,
-                    Accept: "application/json",
-                    "Content-Type": "application/json"
-                }
-            }
-        );
+        // Loop through EACH resource (workspace)
+        for (const resource of resources) {
+            const cloudId = resource.id;
+            const cloudName = resource.name;
 
-        const issueIds = searchResponse.data.issues.map(i => i.id);
-        console.log(`Found ${issueIds.length} issues. Fetching details...`);
+            console.log(`Fetching data for workspace: ${cloudName} (${cloudId})...`);
 
-        // Fetch details for each issue in parallel
-        const detailResponses = await Promise.all(
-            issueIds.map(id =>
-                axios.get(
-                    `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/issue/${id}`,
-                    {
-                        headers: {
-                            Authorization: `Bearer ${accessToken}`,
-                            Accept: "application/json"
+            try {
+                const [projectsResponse, searchResponse] = await Promise.all([
+                    axios.get(
+                        `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/project`,
+                        {
+                            headers: {
+                                Authorization: `Bearer ${accessToken}`,
+                                Accept: "application/json"
+                            }
+                        }
+                    ).catch(err => {
+                        console.error(`  Failed to fetch projects for ${cloudName}:`, err.message);
+                        return { data: [] };
+                    }),
+                    axios.post<{ issues: { id: string, key: string }[] }>(
+                        `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/search/jql`,
+                        {
+                            jql: "created >= -30d order by created DESC",
                         },
-                        params: {
-                            expand: "changelog",
-                            fields: "summary,status,assignee,created,resolutiondate,issuelinks"
+                        {
+                            headers: {
+                                Authorization: `Bearer ${accessToken}`,
+                                Accept: "application/json",
+                                "Content-Type": "application/json"
+                            }
+                        }
+                    )
+                ]);
+
+                // Map projects to their leads
+                const projectLeads: Record<string, { name: string; email: string | null; accountId: string | null }> = {};
+                if (Array.isArray(projectsResponse.data)) {
+                    projectsResponse.data.forEach((p: any) => {
+                        projectLeads[p.id] = {
+                            name: p.lead?.displayName || "Unknown",
+                            email: p.lead?.emailAddress || null,
+                            accountId: p.lead?.accountId || null
+                        };
+                        console.log(`  Project ${p.key}: Lead=${p.lead?.displayName}, Email=${p.lead?.emailAddress ? 'Found' : 'Hidden/Null'}`);
+                    });
+                }
+
+                const issueIds = searchResponse.data.issues.map(i => i.id);
+                console.log(`  Found ${issueIds.length} issues in ${cloudName}. Fetching details...`);
+
+                // Fetch details for each issue in parallel
+                const detailResponses = await Promise.all(
+                    issueIds.map(id =>
+                        axios.get(
+                            `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/issue/${id}`,
+                            {
+                                headers: {
+                                    Authorization: `Bearer ${accessToken}`,
+                                    Accept: "application/json"
+                                },
+                                params: {
+                                    expand: "changelog",
+                                    fields: "summary,status,assignee,created,updated,resolutiondate,issuelinks,project,priority,issuetype,creator,reporter,duedate,labels,components,worklog,timeoriginalestimate,timeestimate,timespent,aggregateprogress,progress,comment,environment,description"
+                                }
+                            }
+                        ).then(res => res.data).catch(err => {
+                            console.error(`  Failed to fetch issue ${id} in ${cloudName}:`, err.message);
+                            return null;
+                        })
+                    )
+                );
+
+                const issues = detailResponses.filter(i => i !== null);
+
+                const workspaceAnalytics = issues.map((issue: any) => {
+
+                    // Task assigned
+                    const assigneeName = issue.fields?.assignee?.displayName || "Unassigned";
+                    const assigneeEmail = issue.fields?.assignee?.emailAddress || null;
+                    const assigneeAccountId = issue.fields?.assignee?.accountId || null;
+
+                    // Task status
+                    const status = issue.fields?.status?.name || "Unknown";
+
+                    // Cycle time
+                    const created = issue.fields?.created ? new Date(issue.fields.created) : new Date();
+                    const resolved = issue.fields?.resolutiondate
+                        ? new Date(issue.fields.resolutiondate)
+                        : null;
+
+                    const cycleTime =
+                        resolved ? (resolved.getTime() - created.getTime()) / 1000 : null;
+
+                    // Blocked issues
+                    const blocked =
+                        issue.fields?.issuelinks?.some((link: any) =>
+                            link.type?.name?.toLowerCase().includes("block")
+                        ) || false;
+
+                    // Project Lead
+                    const projectId = issue.fields?.project?.id;
+                    const projectLead = projectLeads[projectId] || { name: "Unknown", email: null, accountId: null };
+
+                    const statusChanges = issue.changelog?.histories
+                        ?.flatMap((h: any) => h.items)
+                        ?.filter((i: any) => i.field === "status") || [];
+
+                    // New Fields Extraction
+                    const priority = issue.fields?.priority?.name || "None";
+                    const issueType = issue.fields?.issuetype?.name || "Unknown";
+                    const labels = issue.fields?.labels || [];
+                    const components = issue.fields?.components?.map((c: any) => c.name) || [];
+                    const dueDate = issue.fields?.duedate ? new Date(issue.fields.duedate).toISOString() : null;
+                    const updated = issue.fields?.updated ? new Date(issue.fields.updated).toISOString() : null;
+
+                    // People
+                    const reporter = issue.fields?.reporter?.displayName || "Unknown";
+                    const reporterEmail = issue.fields?.reporter?.emailAddress || null;
+                    const creator = issue.fields?.creator?.displayName || "Unknown";
+
+                    // Time Tracking (in seconds)
+                    const originalEstimateSeconds = issue.fields?.timeoriginalestimate || 0;
+                    const remainingEstimateSeconds = issue.fields?.timeestimate || 0;
+                    const timeSpentSeconds = issue.fields?.timespent || 0;
+
+                    // Comments (Last 5 for context)
+                    const comments = issue.fields?.comment?.comments?.slice(-5).map((c: any) => ({
+                        author: c.author?.displayName || "Unknown",
+                        body: c.body?.content?.[0]?.content?.[0]?.text || "No text content", // Simplified rich text extraction
+                        created: c.created
+                    })) || [];
+
+                    // Worklogs
+                    const worklogs = issue.fields?.worklog?.worklogs?.map((w: any) => ({
+                        author: w.author?.displayName,
+                        timeSpent: w.timeSpent,
+                        timeSpentSeconds: w.timeSpentSeconds,
+                        started: w.started
+                    })) || [];
+
+                    // Assignment Timestamp (When was this issue assigned to current assignee?)
+                    let assignedAt = issue.fields?.created ? new Date(issue.fields.created) : new Date(); // Default to created
+                    if (issue.changelog?.histories) {
+                        // Sort histories by created date descending (newest first)
+                        const histories = issue.changelog.histories.sort((a: any, b: any) =>
+                            new Date(b.created).getTime() - new Date(a.created).getTime()
+                        );
+
+                        // Find the most recent 'assignee' change
+                        for (const history of histories) {
+                            const assigneeItem = history.items.find((item: any) => item.field === "assignee");
+                            if (assigneeItem) {
+                                // If the issue is currently assigned to someone, this was the last change event
+                                // We use the history.created timestamp
+                                assignedAt = new Date(history.created);
+                                break;
+                            }
                         }
                     }
-                ).then(res => res.data).catch(err => {
-                    console.error(`Failed to fetch issue ${id}:`, err.message);
-                    return null;
-                })
-            )
-        );
 
-        const issues = detailResponses.filter(i => i !== null);
+                    return {
+                        workspace: issue.fields?.project?.name || cloudName,
+                        ticket: issue.key,
+                        assignee: assigneeName,
+                        assigneeEmail: assigneeEmail,
+                        assigneeAccountId: assigneeAccountId,
+                        status,
+                        cycleTime,
+                        blocked,
+                        assignedAt: assignedAt.toISOString(), // ISO string format
+                        statusChanges,
 
-        if (issues.length > 0) {
-            console.log("First detailed issue structure:", JSON.stringify(issues[0], null, 2));
+                        // New Fields
+                        priority,
+                        issueType,
+                        labels,
+                        components,
+                        dueDate,
+                        updated,
+                        reporter,
+                        reporterEmail,
+                        creator,
+                        originalEstimateSeconds,
+                        remainingEstimateSeconds,
+                        timeSpentSeconds,
+                        comments,
+                        worklogs,
+
+                        projectLead: projectLead.name,
+                        projectLeadEmail: projectLead.email,
+                        projectLeadAccountId: projectLead.accountId
+                    };
+
+                });
+
+                allAnalytics.push(...workspaceAnalytics);
+
+            } catch (err: any) {
+                console.error(`Error fetching for workspace ${cloudName}:`, err.message);
+                // Continue to next workspace even if one fails
+            }
         }
 
-        const analytics = issues.map((issue: any) => {
-
-            // Task assigned
-            const assignee = issue.fields?.assignee?.displayName || "Unassigned";
-
-            // Task status
-            const status = issue.fields?.status?.name || "Unknown";
-
-            // Cycle time
-            const created = issue.fields?.created ? new Date(issue.fields.created) : new Date();
-            const resolved = issue.fields?.resolutiondate
-                ? new Date(issue.fields.resolutiondate)
-                : null;
-
-            const cycleTime =
-                resolved ? (resolved.getTime() - created.getTime()) / 1000 : null;
-
-            // Blocked issues
-            const blocked =
-                issue.fields?.issuelinks?.some((link: any) =>
-                    link.type?.name?.toLowerCase().includes("block")
-                ) || false;
-
-            // Status changes
-            // changelog structure might be different or missing if expand failed
-            const statusChanges = issue.changelog?.histories
-                ?.flatMap((h: any) => h.items)
-                ?.filter((i: any) => i.field === "status") || [];
-
-            return {
-                ticket: issue.key,
-                assignee,
-                status,
-                cycleTime,
-                blocked,
-                statusChanges
-            };
-
-        });
-
-        res.json(analytics);
+        res.json(allAnalytics);
 
     } catch (error: any) {
 
