@@ -1,9 +1,8 @@
 import cron from "node-cron";
 import { Integration } from "../models/Integration";
 import { EmailMetadata } from "../models/EmailMetadata";
-import { decryptToken } from "../utils/encryption";
+import { decryptToken, encryptToken } from "../utils/encryption";
 import { fetchEmailMetadata, refreshAccessToken } from "../utils/gmailService";
-import { encryptToken } from "../utils/encryption";
 
 export function startEmailSyncJob() {
     cron.schedule("*/10 * * * *", async () => {
@@ -11,12 +10,14 @@ export function startEmailSyncJob() {
 
         try {
             const integrations = await Integration.find({ provider: "google" });
+            console.log(`[CRON] Found ${integrations.length} users to sync`);
 
             for (const integration of integrations) {
                 try {
                     let accessToken = decryptToken(integration.encryptedAccessToken);
 
                     if (new Date() > integration.expiry) {
+                        console.log(`[CRON] Refreshing expired token for ${integration.userEmail}`);
                         const refreshToken = decryptToken(integration.encryptedRefreshToken);
                         const newCredentials = await refreshAccessToken(refreshToken);
 
@@ -28,27 +29,29 @@ export function startEmailSyncJob() {
                         }
 
                         await integration.save();
-                        console.log(`[CRON] Refreshed token for org ${integration.orgId}`);
                     }
 
-                    const emails = await fetchEmailMetadata(accessToken);
+                    const emails = await fetchEmailMetadata(accessToken, 50);
 
                     for (const email of emails) {
                         await EmailMetadata.findOneAndUpdate(
-                            { messageId: email.messageId },
+                            { userEmail: integration.userEmail, messageId: email.messageId },
                             {
                                 orgId: integration.orgId,
+                                userEmail: integration.userEmail,
                                 ...email
                             },
                             { upsert: true }
                         );
                     }
 
-                    console.log(`[CRON] Synced ${emails.length} emails for org ${integration.orgId}`);
-                } catch (orgError) {
-                    console.error(`[CRON] Error syncing org ${integration.orgId}:`, orgError);
+                    console.log(`[CRON] Synced ${emails.length} emails for ${integration.userEmail}`);
+                } catch (userError) {
+                    console.error(`[CRON] Error syncing ${integration.userEmail}:`, userError);
                 }
             }
+
+            console.log("[CRON] Email sync job completed");
         } catch (error) {
             console.error("[CRON] Job failed:", error);
         }

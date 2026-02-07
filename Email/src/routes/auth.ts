@@ -32,15 +32,17 @@ router.get("/oauth/google/callback", async (req: Request, res: Response) => {
                 domain: domain
             });
             await org.save();
+            console.log(`[AUTH] New organization created: ${domain}`);
         }
 
         const encryptedAccess = encryptToken(tokens.access_token as string);
         const encryptedRefresh = encryptToken(tokens.refresh_token as string);
 
         await Integration.findOneAndUpdate(
-            { orgId: org.orgId },
+            { userEmail: userEmail },
             {
                 orgId: org.orgId,
+                userEmail: userEmail,
                 provider: "google",
                 encryptedAccessToken: encryptedAccess,
                 encryptedRefreshToken: encryptedRefresh,
@@ -49,8 +51,8 @@ router.get("/oauth/google/callback", async (req: Request, res: Response) => {
             { upsert: true, new: true }
         );
 
-        console.log(`[AUTH] Organization ${domain} connected successfully`);
-        res.send("<html><body><h1>Google Workspace Connected!</h1><p>You can close this window.</p></body></html>");
+        console.log(`[AUTH] User ${userEmail} connected to organization ${domain}`);
+        res.send(`<html><body><h1>Connected!</h1><p>Email: ${userEmail}</p><p>Organization: ${domain}</p><p>You can close this window.</p></body></html>`);
     } catch (error) {
         console.error("[AUTH] OAuth Error:", error);
         res.status(500).send("Authentication failed");
@@ -60,29 +62,55 @@ router.get("/oauth/google/callback", async (req: Request, res: Response) => {
 router.get("/sync/emails", async (req: Request, res: Response) => {
     try {
         const integrations = await Integration.find({ provider: "google" });
+        let totalSynced = 0;
 
         for (const integration of integrations) {
-            const accessToken = decryptToken(integration.encryptedAccessToken);
-            const emails = await fetchEmailMetadata(accessToken);
+            try {
+                const accessToken = decryptToken(integration.encryptedAccessToken);
+                const emails = await fetchEmailMetadata(accessToken, 50);
 
-            for (const email of emails) {
-                await EmailMetadata.findOneAndUpdate(
-                    { messageId: email.messageId },
-                    {
-                        orgId: integration.orgId,
-                        ...email
-                    },
-                    { upsert: true }
-                );
+                for (const email of emails) {
+                    await EmailMetadata.findOneAndUpdate(
+                        { userEmail: integration.userEmail, messageId: email.messageId },
+                        {
+                            orgId: integration.orgId,
+                            userEmail: integration.userEmail,
+                            ...email
+                        },
+                        { upsert: true }
+                    );
+                }
+
+                console.log(`[SYNC] Synced ${emails.length} emails for ${integration.userEmail}`);
+                totalSynced += emails.length;
+            } catch (userError) {
+                console.error(`[SYNC] Error syncing ${integration.userEmail}:`, userError);
             }
-
-            console.log(`[SYNC] Synced ${emails.length} emails for org ${integration.orgId}`);
         }
 
-        res.json({ success: true, message: "Email sync completed" });
+        res.json({ success: true, message: `Synced ${totalSynced} emails from ${integrations.length} users` });
     } catch (error) {
         console.error("[SYNC] Error:", error);
         res.status(500).json({ success: false, error: "Sync failed" });
+    }
+});
+
+router.get("/users", async (req: Request, res: Response) => {
+    try {
+        const integrations = await Integration.find({ provider: "google" }).select("userEmail orgId createdAt");
+        res.json({ success: true, users: integrations });
+    } catch (error) {
+        res.status(500).json({ success: false, error: "Failed to fetch users" });
+    }
+});
+
+router.get("/emails/:userEmail", async (req: Request, res: Response) => {
+    try {
+        const { userEmail } = req.params;
+        const emails = await EmailMetadata.find({ userEmail }).sort({ timestamp: -1 }).limit(50);
+        res.json({ success: true, count: emails.length, emails });
+    } catch (error) {
+        res.status(500).json({ success: false, error: "Failed to fetch emails" });
     }
 });
 
