@@ -59,8 +59,6 @@ export async function requireUserAuth(
                 avatarUrl: profile.avatar_url,
                 type: profile.type as 'User' | 'Organization',
                 accessToken,
-                refreshToken: null,
-                tokenExpiresAt: null,
                 scope: '',
             });
         }
