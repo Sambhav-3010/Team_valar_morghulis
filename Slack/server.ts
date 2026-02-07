@@ -29,7 +29,15 @@ async function resolveMention(id: string): Promise<IMention | null> {
             email: info.user.profile?.email || "No Email",
             type: info.user.is_bot ? 'bot' : 'user'
         };
-    } catch (error) {
+    } catch (error: any) {
+        if (error.data?.error === 'user_not_found') {
+            return {
+                id: id,
+                name: "Unknown User",
+                email: "None",
+                type: 'user'
+            };
+        }
         console.error(`Error resolving mention ${id}:`, error);
         return null;
     }
@@ -77,6 +85,8 @@ async function processEvent(rawEventId: any, event: any, teamId?: string) {
     } catch (err: any) {
         if (err.data?.error === 'invalid_auth') {
             console.error("FATAL: Invalid Slack Auth Token. Please check your SLACK_BOT_TOKEN in .env.");
+        } else if (err.data?.error === 'user_not_found') {
+            console.warn("User not found during event processing, event recorded with truncated info.");
         } else {
             console.error("Metadata Extraction Error:", err);
         }
