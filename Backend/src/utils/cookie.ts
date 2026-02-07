@@ -1,5 +1,5 @@
 import { CookieOptions, Response } from "express";
-import { signJwt } from "./jwt.js";
+import { signJwt } from "./jwt";
 import dotenv from "dotenv";
 dotenv.config();
 

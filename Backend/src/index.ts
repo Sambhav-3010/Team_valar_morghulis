@@ -2,8 +2,8 @@ import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import mongoose from "mongoose";
-import passport from "./utils/passport.js";
-import authRoutes from "./routes/auth.js";
+import passport from "./utils/passport";
+import authRoutes from "./routes/auth";
 import dotenv from "dotenv";
 dotenv.config();
 

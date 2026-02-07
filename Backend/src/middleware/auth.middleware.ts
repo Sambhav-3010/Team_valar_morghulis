@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from "express";
-import { verifyJwt } from "../utils/jwt.js";
-import User from "../models/User.js";
+import { verifyJwt } from "../utils/jwt";
+import User from "../models/User";
 import dotenv from "dotenv";
 dotenv.config();
 
