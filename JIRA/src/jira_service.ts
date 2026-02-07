@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import axios from "axios";
 import JiraIssue from "./models/JiraIssue";
+import SyncState from "./models/SyncState";
 
 const CLIENT_ID = process.env.CLIENT_ID!;
 const CLIENT_SECRET = process.env.CLIENT_SECRET!;
@@ -112,23 +113,45 @@ export const fetchJiraAnalytics = async (req: Request, res: Response) => {
             console.log(`Fetching data for workspace: ${cloudName} (${cloudId})...`);
 
             try {
-                const [projectsResponse, searchResponse] = await Promise.all([
-                    axios.get(
-                        `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/project`,
-                        {
-                            headers: {
-                                Authorization: `Bearer ${accessToken}`,
-                                Accept: "application/json"
-                            }
+                // Get last sync time for this resource
+                const syncState = await SyncState.findOne({ resourceId: cloudId });
+                let jql = "created >= -30d order by created DESC";
+
+                if (syncState?.lastFetched) {
+                    const lastFetched = new Date(syncState.lastFetched);
+                    jql = `updated >= "${lastFetched.toISOString()}" order by updated ASC`;
+                    console.log(`  Fetching updates since ${lastFetched.toISOString()} for ${cloudName}`);
+                } else {
+                    console.log(`  Fetching initial data (last 30 days) for ${cloudName}`);
+                }
+
+                // Fetch Projects
+                const projectsResponse = await axios.get(
+                    `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/project`,
+                    {
+                        headers: {
+                            Authorization: `Bearer ${accessToken}`,
+                            Accept: "application/json"
                         }
-                    ).catch(err => {
-                        console.error(`  Failed to fetch projects for ${cloudName}:`, err.message);
-                        return { data: [] };
-                    }),
-                    axios.post<{ issues: { id: string, key: string }[] }>(
+                    }
+                ).catch(err => {
+                    console.error(`  Failed to fetch projects for ${cloudName}:`, err.message);
+                    return { data: [] };
+                });
+
+                // Fetch Issues with Pagination
+                let startAt = 0;
+                let total = 0;
+                const allIssues: any[] = [];
+
+                do {
+                    const searchResponse = await axios.post<{ issues: { id: string, key: string }[], total: number }>(
                         `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/search/jql`,
                         {
-                            jql: "created >= -30d order by created DESC",
+                            jql,
+                            startAt,
+                            maxResults: 100,
+                            fields: ["id", "key"] // we only need IDs first
                         },
                         {
                             headers: {
@@ -137,8 +160,17 @@ export const fetchJiraAnalytics = async (req: Request, res: Response) => {
                                 "Content-Type": "application/json"
                             }
                         }
-                    )
-                ]);
+                    );
+
+                    const issues = searchResponse.data.issues || [];
+                    allIssues.push(...issues);
+                    total = searchResponse.data.total;
+                    startAt += issues.length;
+
+                    console.log(`  Fetched ${startAt}/${total} issues...`);
+
+                } while (startAt < total);
+
 
                 // Map projects to their leads
                 const projectLeads: Record<string, { name: string; email: string | null; accountId: string | null }> = {};
@@ -153,7 +185,7 @@ export const fetchJiraAnalytics = async (req: Request, res: Response) => {
                     });
                 }
 
-                const issueIds = searchResponse.data.issues.map(i => i.id);
+                const issueIds = allIssues.map(i => i.id);
                 console.log(`  Found ${issueIds.length} issues in ${cloudName}. Fetching details...`);
 
                 // Fetch details for each issue in parallel
@@ -315,6 +347,25 @@ export const fetchJiraAnalytics = async (req: Request, res: Response) => {
 
                     await JiraIssue.bulkWrite(bulkOps);
                     console.log(`  Saved/Updated ${workspaceAnalytics.length} issues to MongoDB.`);
+
+                    // Update Sync State with the latest 'updated' timestamp
+                    const latestUpdate = workspaceAnalytics.reduce((max, issue) => {
+                        const issueDate = issue.updated ? new Date(issue.updated).getTime() : 0;
+                        return issueDate > max ? issueDate : max;
+                    }, 0);
+
+                    if (latestUpdate > 0) {
+                        await SyncState.findOneAndUpdate(
+                            { resourceId: cloudId },
+                            {
+                                resourceId: cloudId,
+                                resourceName: cloudName,
+                                lastFetched: new Date(latestUpdate)
+                            },
+                            { upsert: true, new: true }
+                        );
+                        console.log(`  Sync state updated to: ${new Date(latestUpdate).toISOString()}`);
+                    }
                 }
 
             } catch (err: any) {
