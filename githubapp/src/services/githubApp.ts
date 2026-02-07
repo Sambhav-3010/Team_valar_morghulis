@@ -6,21 +6,32 @@ import { Organization } from '../models/Organization';
 // Singleton instance of the GitHub App
 let app: App | null = null;
 
+
 function getApp(): App {
     if (!app) {
         const appId = process.env.APP_ID;
         const privateKey = process.env.PRIVATE_KEY;
+        const clientId = process.env.CLIENT_ID;
+        const clientSecret = process.env.CLIENT_SECRET;
 
-        if (!appId || !privateKey) {
-            throw new Error('Missing APP_ID or PRIVATE_KEY environment variables');
+        if (!appId || !privateKey || !clientId || !clientSecret) {
+            throw new Error('Missing APP_ID, PRIVATE_KEY, CLIENT_ID, or CLIENT_SECRET environment variables');
         }
 
         app = new App({
             appId: appId,
             privateKey: privateKey,
+            oauth: {
+                clientId: clientId,
+                clientSecret: clientSecret,
+            },
         });
     }
     return app;
+}
+
+export function getAppNode(): App {
+    return getApp();
 }
 
 /**

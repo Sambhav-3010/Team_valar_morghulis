@@ -2,7 +2,7 @@ import { Router } from 'express';
 import {
     initiateUserOAuth,
     handleUserCallback,
-    refreshUserTokenEndpoint,
+
     getCurrentUser,
 } from '../controllers/authController';
 import { handleWebhook } from '../controllers/webhookController';
@@ -32,7 +32,7 @@ router.get('/health', (_req, res) => {
 // User OAuth routes
 router.get('/auth/user/login', initiateUserOAuth);
 router.get('/auth/github/callback', handleUserCallback);
-router.post('/auth/user/refresh', refreshUserTokenEndpoint);
+
 router.get('/auth/user/me', getCurrentUser);
 
 // Webhook

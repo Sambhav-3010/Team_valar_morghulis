@@ -2,94 +2,11 @@ import { Request, Response } from 'express';
 import { Octokit } from '@octokit/rest';
 import { User } from '../models';
 import { successResponse, errorResponse } from '../types/api.types';
-import { getUserInstallationId } from '../services/githubApp';
+import { getUserInstallationId, getAppNode } from '../services/githubApp';
 
-const GITHUB_OAUTH_AUTHORIZE_URL = 'https://github.com/login/oauth/authorize';
-const GITHUB_OAUTH_TOKEN_URL = 'https://github.com/login/oauth/access_token';
 
-interface OAuthTokenResponse {
-    access_token: string;
-    token_type: string;
-    scope: string;
-    refresh_token?: string;
-    expires_in?: number;
-    refresh_token_expires_in?: number;
-}
 
-interface OAuthErrorResponse {
-    error: string;
-    error_description?: string;
-}
 
-function getOAuthLoginUrl(state?: string): string {
-    const clientId = process.env.CLIENT_ID!;
-    const redirectUri = process.env.OAUTH_CALLBACK_URL!;
-    const scope = 'read:user user:email repo read:org';
-
-    const params = new URLSearchParams({
-        client_id: clientId,
-        redirect_uri: redirectUri,
-        scope,
-        ...(state && { state }),
-    });
-
-    return `${GITHUB_OAUTH_AUTHORIZE_URL}?${params.toString()}`;
-}
-
-async function exchangeCodeForToken(code: string): Promise<OAuthTokenResponse> {
-    const clientId = process.env.GITHUB_CLIENT_ID!;
-    const clientSecret = process.env.GITHUB_CLIENT_SECRET!;
-    const redirectUri = process.env.OAUTH_CALLBACK_URL!;
-
-    const response = await fetch(GITHUB_OAUTH_TOKEN_URL, {
-        method: 'POST',
-        headers: {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-            client_id: clientId,
-            client_secret: clientSecret,
-            code,
-            redirect_uri: redirectUri,
-        }),
-    });
-
-    const data = await response.json() as OAuthTokenResponse | OAuthErrorResponse;
-
-    if ('error' in data) {
-        throw new Error(`OAuth error: ${data.error_description || data.error}`);
-    }
-
-    return data;
-}
-
-async function refreshUserToken(refreshToken: string): Promise<OAuthTokenResponse> {
-    const clientId = process.env.GITHUB_CLIENT_ID!;
-    const clientSecret = process.env.GITHUB_CLIENT_SECRET!;
-
-    const response = await fetch(GITHUB_OAUTH_TOKEN_URL, {
-        method: 'POST',
-        headers: {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-            client_id: clientId,
-            client_secret: clientSecret,
-            grant_type: 'refresh_token',
-            refresh_token: refreshToken,
-        }),
-    });
-
-    const data = await response.json() as OAuthTokenResponse | OAuthErrorResponse;
-
-    if ('error' in data) {
-        throw new Error(`OAuth refresh error: ${data.error_description || data.error}`);
-    }
-
-    return data;
-}
 
 function getUserOctokit(accessToken: string): Octokit {
     return new Octokit({
@@ -106,10 +23,19 @@ async function getUserProfile(accessToken: string) {
 
 export async function initiateUserOAuth(_req: Request, res: Response): Promise<void> {
     try {
-        const state = Math.random().toString(36).substring(7);
-        const loginUrl = getOAuthLoginUrl(state);
-        res.redirect(loginUrl);
+        const app = getAppNode();
+        const { url } = app.oauth.getWebFlowAuthorizationUrl({
+            redirectUrl: process.env.OAUTH_CALLBACK_URL,
+            // scopes: ['read:user', 'user:email', 'repo', 'read:org'], // GitHub Apps use permissions, but for user-to-server token we might need them? 
+            // Actually, for GitHub Apps, we request permissions during installation. 
+            // For user identification, we might not need explicit scopes if we just want identity?
+            // But if we want to act on behalf of user?
+            // Let's try to check what options are allowed or just remove it if it causes error and rely on app configuration.
+        });
+
+        res.redirect(url);
     } catch (error) {
+        console.error('Failed to initiate OAuth:', error);
         res.status(500).json(errorResponse('Failed to initiate user OAuth'));
     }
 }
@@ -128,11 +54,14 @@ export async function handleUserCallback(req: Request, res: Response): Promise<v
             return;
         }
 
-        const tokenResponse = await exchangeCodeForToken(code);
-        const profile = await getUserProfile(tokenResponse.access_token);
-        const tokenExpiresAt = tokenResponse.expires_in
-            ? new Date(Date.now() + tokenResponse.expires_in * 1000)
-            : null;
+        const app = getAppNode();
+        const { authentication } = await app.oauth.createToken({
+            code,
+            redirectUrl: process.env.OAUTH_CALLBACK_URL,
+        });
+
+        const profile = await getUserProfile(authentication.token);
+
 
         let user = await User.findOne({ githubId: profile.id });
 
@@ -148,10 +77,9 @@ export async function handleUserCallback(req: Request, res: Response): Promise<v
             user.name = profile.name;
             user.email = profile.email;
             user.avatarUrl = profile.avatar_url;
-            user.accessToken = tokenResponse.access_token;
-            user.refreshToken = tokenResponse.refresh_token || null;
-            user.tokenExpiresAt = tokenExpiresAt;
-            user.scope = tokenResponse.scope;
+            user.accessToken = authentication.token;
+            // user.scope = ... // Scope is not directly available in the typed response? 
+            user.scope = '';
 
             // Update installation ID if provided in query or if missing in DB
             if (finalInstallationId) {
@@ -177,10 +105,8 @@ export async function handleUserCallback(req: Request, res: Response): Promise<v
                 email: profile.email,
                 avatarUrl: profile.avatar_url,
                 type: profile.type as 'User' | 'Organization',
-                accessToken: tokenResponse.access_token,
-                refreshToken: tokenResponse.refresh_token || null,
-                tokenExpiresAt,
-                scope: tokenResponse.scope,
+                accessToken: authentication.token,
+                scope: '', // Scope handling simplified
                 installationId: finalInstallationId,
             });
         }
@@ -195,48 +121,12 @@ export async function handleUserCallback(req: Request, res: Response): Promise<v
                     name: user.name,
                     avatarUrl: user.avatarUrl,
                 },
-                accessToken: tokenResponse.access_token,
+                accessToken: authentication.token,
             })
         );
     } catch (error) {
         console.error('OAuth callback error:', error);
         res.status(500).json(errorResponse('Failed to process user OAuth callback'));
-    }
-}
-
-export async function refreshUserTokenEndpoint(req: Request, res: Response): Promise<void> {
-    try {
-        const { refreshToken } = req.body;
-
-        if (!refreshToken) {
-            res.status(400).json(errorResponse('Missing refresh token'));
-            return;
-        }
-
-        const tokenResponse = await refreshUserToken(refreshToken);
-        const profile = await getUserProfile(tokenResponse.access_token);
-        const tokenExpiresAt = tokenResponse.expires_in
-            ? new Date(Date.now() + tokenResponse.expires_in * 1000)
-            : null;
-
-        await User.findOneAndUpdate(
-            { githubId: profile.id },
-            {
-                accessToken: tokenResponse.access_token,
-                refreshToken: tokenResponse.refresh_token || null,
-                tokenExpiresAt,
-                scope: tokenResponse.scope,
-            }
-        );
-
-        res.json(
-            successResponse({
-                accessToken: tokenResponse.access_token,
-                expiresIn: tokenResponse.expires_in,
-            })
-        );
-    } catch (error) {
-        res.status(500).json(errorResponse('Failed to refresh token'));
     }
 }
 

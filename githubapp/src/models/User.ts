@@ -9,8 +9,6 @@ export interface IUser extends Document {
     type: 'User' | 'Organization';
     installationId: number | null;
     accessToken: string;
-    refreshToken: string | null;
-    tokenExpiresAt: Date | null;
     scope: string;
     createdAt: Date;
     updatedAt: Date;
@@ -26,8 +24,6 @@ const UserSchema = new Schema<IUser>(
         type: { type: String, enum: ['User', 'Organization'], default: 'User' },
         installationId: { type: Number, default: null },
         accessToken: { type: String, required: true },
-        refreshToken: { type: String, default: null },
-        tokenExpiresAt: { type: Date, default: null },
         scope: { type: String, default: '' },
     },
     {
