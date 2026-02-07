@@ -7,6 +7,7 @@ export interface IEmailMetadata extends Document {
     sender: string;
     receiver: string[];
     subject: string;
+    body: string;
     timestamp: number;
     threadId: string;
     createdAt: Date;
@@ -19,6 +20,7 @@ const EmailMetadataSchema: Schema = new Schema({
     sender: { type: String },
     receiver: [{ type: String }],
     subject: { type: String },
+    body: { type: String },
     timestamp: { type: Number },
     threadId: { type: String },
     createdAt: { type: Date, default: Date.now }

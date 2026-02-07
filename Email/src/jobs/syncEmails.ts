@@ -5,7 +5,7 @@ import { decryptToken, encryptToken } from "../utils/encryption";
 import { fetchEmailMetadata, refreshAccessToken } from "../utils/gmailService";
 
 export function startEmailSyncJob() {
-    cron.schedule("*/10 * * * *", async () => {
+    cron.schedule("*/30 * * * *", async () => {
         console.log("[CRON] Starting email sync job...");
 
         try {
@@ -31,21 +31,34 @@ export function startEmailSyncJob() {
                         await integration.save();
                     }
 
-                    const emails = await fetchEmailMetadata(accessToken, 50);
+                    const emails = await fetchEmailMetadata(accessToken, 15);
+                    let newCount = 0;
 
                     for (const email of emails) {
-                        await EmailMetadata.findOneAndUpdate(
-                            { userEmail: integration.userEmail, messageId: email.messageId },
-                            {
+                        if (!email.messageId) continue;
+
+                        const existing = await EmailMetadata.findOne({
+                            userEmail: integration.userEmail,
+                            messageId: email.messageId
+                        });
+
+                        if (!existing) {
+                            await EmailMetadata.create({
                                 orgId: integration.orgId,
                                 userEmail: integration.userEmail,
-                                ...email
-                            },
-                            { upsert: true }
-                        );
+                                messageId: email.messageId,
+                                threadId: email.threadId || "",
+                                sender: email.sender,
+                                receiver: email.receiver,
+                                subject: email.subject,
+                                body: email.body,
+                                timestamp: email.timestamp
+                            });
+                            newCount++;
+                        }
                     }
 
-                    console.log(`[CRON] Synced ${emails.length} emails for ${integration.userEmail}`);
+                    console.log(`[CRON] ${integration.userEmail}: ${newCount} new emails (${emails.length - newCount} skipped)`);
                 } catch (userError) {
                     console.error(`[CRON] Error syncing ${integration.userEmail}:`, userError);
                 }
@@ -57,5 +70,5 @@ export function startEmailSyncJob() {
         }
     });
 
-    console.log("[CRON] Email sync job scheduled (every 10 minutes)");
+    console.log("[CRON] Email sync job scheduled (every 30 minutes)");
 }

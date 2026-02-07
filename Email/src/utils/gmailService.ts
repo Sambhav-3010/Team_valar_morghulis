@@ -33,7 +33,34 @@ export async function refreshAccessToken(refreshToken: string) {
     return credentials;
 }
 
-export async function fetchEmailMetadata(accessToken: string, maxResults: number = 50) {
+function extractBody(payload: any): string {
+    if (!payload) return "";
+
+    if (payload.body?.data) {
+        return Buffer.from(payload.body.data, "base64").toString("utf-8");
+    }
+
+    if (payload.parts) {
+        for (const part of payload.parts) {
+            if (part.mimeType === "text/plain" && part.body?.data) {
+                return Buffer.from(part.body.data, "base64").toString("utf-8");
+            }
+        }
+        for (const part of payload.parts) {
+            if (part.mimeType === "text/html" && part.body?.data) {
+                return Buffer.from(part.body.data, "base64").toString("utf-8");
+            }
+        }
+        for (const part of payload.parts) {
+            const nested = extractBody(part);
+            if (nested) return nested;
+        }
+    }
+
+    return "";
+}
+
+export async function fetchEmailMetadata(accessToken: string, maxResults: number = 15) {
     oauth2Client.setCredentials({ access_token: accessToken });
     const gmail = google.gmail({ version: "v1", auth: oauth2Client });
 
@@ -49,12 +76,13 @@ export async function fetchEmailMetadata(accessToken: string, maxResults: number
         const detail = await gmail.users.messages.get({
             userId: "me",
             id: msg.id as string,
-            format: "metadata",
-            metadataHeaders: ["From", "To", "Subject", "Date"]
+            format: "full"
         });
 
         const headers = detail.data.payload?.headers || [];
         const getHeader = (name: string) => headers.find((h: any) => h.name === name)?.value || "";
+
+        const body = extractBody(detail.data.payload);
 
         emailData.push({
             messageId: msg.id,
@@ -62,6 +90,7 @@ export async function fetchEmailMetadata(accessToken: string, maxResults: number
             sender: getHeader("From"),
             receiver: getHeader("To").split(",").map((r: string) => r.trim()),
             subject: getHeader("Subject"),
+            body: body,
             timestamp: Math.floor(parseInt(detail.data.internalDate || "0") / 1000)
         });
     }

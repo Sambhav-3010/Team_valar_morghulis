@@ -62,33 +62,47 @@ router.get("/oauth/google/callback", async (req: Request, res: Response) => {
 router.get("/sync/emails", async (req: Request, res: Response) => {
     try {
         const integrations = await Integration.find({ provider: "google" });
-        let totalSynced = 0;
+        let totalNew = 0;
+        let totalSkipped = 0;
 
         for (const integration of integrations) {
             try {
                 const accessToken = decryptToken(integration.encryptedAccessToken);
-                const emails = await fetchEmailMetadata(accessToken, 50);
+                const emails = await fetchEmailMetadata(accessToken, 15);
 
                 for (const email of emails) {
-                    await EmailMetadata.findOneAndUpdate(
-                        { userEmail: integration.userEmail, messageId: email.messageId },
-                        {
+                    if (!email.messageId) continue;
+
+                    const existing = await EmailMetadata.findOne({
+                        userEmail: integration.userEmail,
+                        messageId: email.messageId
+                    });
+
+                    if (!existing) {
+                        await EmailMetadata.create({
                             orgId: integration.orgId,
                             userEmail: integration.userEmail,
-                            ...email
-                        },
-                        { upsert: true }
-                    );
+                            messageId: email.messageId,
+                            threadId: email.threadId || "",
+                            sender: email.sender,
+                            receiver: email.receiver,
+                            subject: email.subject,
+                            body: email.body,
+                            timestamp: email.timestamp
+                        });
+                        totalNew++;
+                    } else {
+                        totalSkipped++;
+                    }
                 }
 
-                console.log(`[SYNC] Synced ${emails.length} emails for ${integration.userEmail}`);
-                totalSynced += emails.length;
+                console.log(`[SYNC] Processed ${emails.length} emails for ${integration.userEmail}`);
             } catch (userError) {
                 console.error(`[SYNC] Error syncing ${integration.userEmail}:`, userError);
             }
         }
 
-        res.json({ success: true, message: `Synced ${totalSynced} emails from ${integrations.length} users` });
+        res.json({ success: true, newEmails: totalNew, skipped: totalSkipped, users: integrations.length });
     } catch (error) {
         console.error("[SYNC] Error:", error);
         res.status(500).json({ success: false, error: "Sync failed" });
@@ -104,10 +118,19 @@ router.get("/users", async (req: Request, res: Response) => {
     }
 });
 
+router.get("/emails", async (req: Request, res: Response) => {
+    try {
+        const emails = await EmailMetadata.find().sort({ timestamp: -1 }).limit(50);
+        res.json({ success: true, count: emails.length, emails });
+    } catch (error) {
+        res.status(500).json({ success: false, error: "Failed to fetch emails" });
+    }
+});
+
 router.get("/emails/:userEmail", async (req: Request, res: Response) => {
     try {
         const { userEmail } = req.params;
-        const emails = await EmailMetadata.find({ userEmail }).sort({ timestamp: -1 }).limit(50);
+        const emails = await EmailMetadata.find({ userEmail }).sort({ timestamp: -1 }).limit(15);
         res.json({ success: true, count: emails.length, emails });
     } catch (error) {
         res.status(500).json({ success: false, error: "Failed to fetch emails" });
