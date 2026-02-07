@@ -1,14 +1,16 @@
 import { Request, Response } from "express";
 import axios from "axios";
+import cron from "node-cron";
 import JiraIssue from "./models/JiraIssue";
 import SyncState from "./models/SyncState";
+import JiraAuth from "./models/JiraAuth";
 
 const CLIENT_ID = process.env.CLIENT_ID!;
 const CLIENT_SECRET = process.env.CLIENT_SECRET!;
 const REDIRECT_URI = process.env.REDIRECT_URI!;
 
-let accessToken = "";
-let resources: { id: string, name: string }[] = [];
+// Keep track of sync status to avoid overlapping jobs
+let isSyncing = false;
 
 /*
 ==================================
@@ -22,7 +24,7 @@ export const connectJira = (req: Request, res: Response) => {
         `https://auth.atlassian.com/authorize` +
         `?audience=api.atlassian.com` +
         `&client_id=${CLIENT_ID}` +
-        `&scope=read:jira-work%20read:jira-user%20offline_access` +
+        `&scope=read:jira-work%20read:jira-user%20offline_access` + // added offline_access
         `&redirect_uri=${REDIRECT_URI}` +
         `&response_type=code` +
         `&prompt=consent`;
@@ -43,7 +45,7 @@ export const jiraCallback = async (req: Request, res: Response) => {
     try {
 
         // Exchange auth code for token
-        const tokenResponse = await axios.post<{ access_token: string }>(
+        const tokenResponse = await axios.post<{ access_token: string, refresh_token?: string, scope?: string, expires_in?: number }>(
             "https://auth.atlassian.com/oauth/token",
             {
                 grant_type: "authorization_code",
@@ -54,30 +56,22 @@ export const jiraCallback = async (req: Request, res: Response) => {
             }
         );
 
-        accessToken = tokenResponse.data.access_token;
-        console.log("accessToken received", accessToken);
+        const { access_token, refresh_token, scope, expires_in } = tokenResponse.data;
 
-        // Get cloudid
-        const cloudResponse = await axios.get<{ id: string, name: string }[]>(
-            "https://api.atlassian.com/oauth/token/accessible-resources",
-            {
-                headers: {
-                    Authorization: `Bearer ${accessToken}`
-                }
-            }
-        );
+        console.log("Tokens received. Saving to DB...");
 
-        console.log("Available Resources:", JSON.stringify(cloudResponse.data, null, 2));
+        // Store tokens in DB (Upsert - assuming single user/org for now)
+        await JiraAuth.findOneAndUpdate({}, {
+            accessToken: access_token,
+            refreshToken: refresh_token || "",
+            scope: scope || "",
+            expiresIn: expires_in || 3600
+        }, { upsert: true, new: true });
 
-        if (cloudResponse.data.length === 0) {
-            throw new Error("No accessible resources found.");
-        }
+        // Initial Sync Trigger
+        runJiraSync().catch(console.error);
 
-        // Store ALL resources
-        resources = cloudResponse.data;
-        console.log(`Stored ${resources.length} resources.`);
-
-        res.send("Jira Connected Successfully! You can now fetch analytics.");
+        res.send("Jira Connected Successfully! Data sync started in background.");
 
     } catch (error) {
 
@@ -90,20 +84,123 @@ export const jiraCallback = async (req: Request, res: Response) => {
 
 /*
 ==================================
-3. Fetch Jira Analytics Data
+3. Token Refresh Mechanism
 ==================================
 */
 
-export const fetchJiraAnalytics = async (req: Request, res: Response) => {
+const getValidAccessToken = async (): Promise<string | null> => {
+    try {
+        const auth = await JiraAuth.findOne();
+        if (!auth) return null;
 
+        // Simple check: In a real app we might check expiration time explicitly.
+        // For now, let's just return the token if we have it, 
+        // OR proactive refresh if we added 'expiresAt' field.
+        // But since we can catch 401s, we can also refresh on demand.
+        // Let's implement proactive refresh if we want, or just return existing.
+        // Better: Try to use it, catch 401, then refresh? 
+        // Or refresh if older than 50 minutes? 
+        // Let's implement explicit refresh call if 401 happens in the sync function.
+        // For now, return what we have.
+        return auth.accessToken;
+    } catch (err) {
+        console.error("Error retrieving token:", err);
+        return null;
+    }
+};
 
-    if (!accessToken || resources.length === 0) {
-        res.status(401).send("Not connected to Jira. Please visit /connect first.");
-        return;
+const refreshAccessToken = async (): Promise<string | null> => {
+    try {
+        const auth = await JiraAuth.findOne();
+        if (!auth || !auth.refreshToken) {
+            console.error("No refresh token available.");
+            return null;
+        }
+
+        console.log("Refreshing access token...");
+        const response = await axios.post<{ access_token: string, refresh_token?: string }>(
+            "https://auth.atlassian.com/oauth/token",
+            {
+                grant_type: "refresh_token",
+                client_id: CLIENT_ID,
+                client_secret: CLIENT_SECRET,
+                refresh_token: auth.refreshToken
+            }
+        );
+
+        const { access_token, refresh_token } = response.data;
+
+        await JiraAuth.updateOne({}, {
+            accessToken: access_token,
+            refreshToken: refresh_token || auth.refreshToken // Rotate if provided
+        });
+
+        console.log("Token refreshed successfully.");
+        return access_token;
+
+    } catch (error: any) {
+        console.error("Failed to refresh token:", error.response?.data || error.message);
+        return null;
+    }
+};
+
+/*
+==================================
+4. Core Sync Logic
+==================================
+*/
+
+export const runJiraSync = async () => {
+    if (isSyncing) {
+        console.log("Sync already in progress. Skipping.");
+        return [];
     }
 
+    isSyncing = true;
+    const allAnalytics: any[] = [];
+
     try {
-        const allAnalytics: any[] = [];
+        let accessToken = await getValidAccessToken();
+
+        if (!accessToken) {
+            console.log("No access token found. Please connect Jira first.");
+            isSyncing = false;
+            return [];
+        }
+
+        // Fetch Accessible Resources (Workspaces)
+        // If 401, try refreshing token once
+        let cloudResponse;
+        try {
+            cloudResponse = await axios.get<{ id: string, name: string }[]>(
+                "https://api.atlassian.com/oauth/token/accessible-resources",
+                { headers: { Authorization: `Bearer ${accessToken}` } }
+            );
+        } catch (err: any) {
+            if (err.response?.status === 401) {
+                console.log("Token expired during resource fetch. Refreshing...");
+                accessToken = await refreshAccessToken();
+                if (accessToken) {
+                    cloudResponse = await axios.get<{ id: string, name: string }[]>(
+                        "https://api.atlassian.com/oauth/token/accessible-resources",
+                        { headers: { Authorization: `Bearer ${accessToken}` } }
+                    );
+                } else {
+                    throw new Error("Failed to refresh token.");
+                }
+            } else {
+                throw err;
+            }
+        }
+
+        const resources = cloudResponse.data;
+        console.log(`Found ${resources.length} accessible resources.`);
+
+        if (resources.length === 0) {
+            console.log("No changes or resources found.");
+            isSyncing = false;
+            return [];
+        }
 
         // Loop through EACH resource (workspace)
         for (const resource of resources) {
@@ -113,7 +210,7 @@ export const fetchJiraAnalytics = async (req: Request, res: Response) => {
             console.log(`Fetching data for workspace: ${cloudName} (${cloudId})...`);
 
             try {
-                // Get last sync time for this resource
+                // Get last sync time
                 const syncState = await SyncState.findOne({ resourceId: cloudId });
                 let jql = "created >= -30d order by created DESC";
 
@@ -143,6 +240,7 @@ export const fetchJiraAnalytics = async (req: Request, res: Response) => {
                 let startAt = 0;
                 let total = 0;
                 const allIssues: any[] = [];
+                const MAX_RESULTS = 100;
 
                 do {
                     const searchResponse = await axios.post<{ issues: { id: string, key: string }[], total: number }>(
@@ -150,8 +248,8 @@ export const fetchJiraAnalytics = async (req: Request, res: Response) => {
                         {
                             jql,
                             startAt,
-                            maxResults: 100,
-                            fields: ["id", "key"] // we only need IDs first
+                            maxResults: MAX_RESULTS,
+                            fields: ["id", "key"]
                         },
                         {
                             headers: {
@@ -171,8 +269,12 @@ export const fetchJiraAnalytics = async (req: Request, res: Response) => {
 
                 } while (startAt < total);
 
+                if (allIssues.length === 0) {
+                    console.log(`  No new/updated issues for ${cloudName}.`);
+                    continue;
+                }
 
-                // Map projects to their leads
+                // Map projects to leads
                 const projectLeads: Record<string, { name: string; email: string | null; accountId: string | null }> = {};
                 if (Array.isArray(projectsResponse.data)) {
                     projectsResponse.data.forEach((p: any) => {
@@ -181,117 +283,91 @@ export const fetchJiraAnalytics = async (req: Request, res: Response) => {
                             email: p.lead?.emailAddress || null,
                             accountId: p.lead?.accountId || null
                         };
-                        console.log(`  Project ${p.key}: Lead=${p.lead?.displayName}, Email=${p.lead?.emailAddress ? 'Found' : 'Hidden/Null'}`);
                     });
                 }
 
                 const issueIds = allIssues.map(i => i.id);
-                console.log(`  Found ${issueIds.length} issues in ${cloudName}. Fetching details...`);
+                console.log(`  Processing ${issueIds.length} issues...`);
 
-                // Fetch details for each issue in parallel
+                // Fetch details for each issue
                 const detailResponses = await Promise.all(
-                    issueIds.map(id =>
-                        axios.get(
-                            `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/issue/${id}`,
-                            {
-                                headers: {
-                                    Authorization: `Bearer ${accessToken}`,
-                                    Accept: "application/json"
-                                },
-                                params: {
-                                    expand: "changelog",
-                                    fields: "summary,status,assignee,created,updated,resolutiondate,issuelinks,project,priority,issuetype,creator,reporter,duedate,labels,components,worklog,timeoriginalestimate,timeestimate,timespent,aggregateprogress,progress,comment,environment,description"
+                    issueIds.map(async (id) => {
+                        try {
+                            const res = await axios.get(
+                                `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/issue/${id}`,
+                                {
+                                    headers: { Authorization: `Bearer ${accessToken}` },
+                                    params: {
+                                        expand: "changelog",
+                                        fields: "summary,status,assignee,created,updated,resolutiondate,issuelinks,project,priority,issuetype,creator,reporter,duedate,labels,components,worklog,timeoriginalestimate,timeestimate,timespent,aggregateprogress,progress,comment,environment,description"
+                                    }
                                 }
-                            }
-                        ).then(res => res.data).catch(err => {
+                            );
+                            return res.data;
+                        } catch (err: any) {
                             console.error(`  Failed to fetch issue ${id} in ${cloudName}:`, err.message);
                             return null;
-                        })
-                    )
+                        }
+                    })
                 );
 
                 const issues = detailResponses.filter(i => i !== null);
 
+                // Transform Data
                 const workspaceAnalytics = issues.map((issue: any) => {
+                    // Helper for nested fields
+                    const fields = issue.fields || {};
 
                     // Task assigned
-                    const assigneeName = issue.fields?.assignee?.displayName || "Unassigned";
-                    const assigneeEmail = issue.fields?.assignee?.emailAddress || null;
-                    const assigneeAccountId = issue.fields?.assignee?.accountId || null;
+                    const assigneeName = fields.assignee?.displayName || "Unassigned";
+                    const assigneeEmail = fields.assignee?.emailAddress || null;
+                    const assigneeAccountId = fields.assignee?.accountId || null;
 
                     // Task status
-                    const status = issue.fields?.status?.name || "Unknown";
+                    const status = fields.status?.name || "Unknown";
 
                     // Cycle time
-                    const created = issue.fields?.created ? new Date(issue.fields.created) : new Date();
-                    const resolved = issue.fields?.resolutiondate
-                        ? new Date(issue.fields.resolutiondate)
-                        : null;
-
-                    const cycleTime =
-                        resolved ? (resolved.getTime() - created.getTime()) / 1000 : null;
+                    const created = fields.created ? new Date(fields.created) : new Date();
+                    const resolved = fields.resolutiondate ? new Date(fields.resolutiondate) : null;
+                    const cycleTime = resolved ? (resolved.getTime() - created.getTime()) / 1000 : null;
 
                     // Blocked issues
-                    const blocked =
-                        issue.fields?.issuelinks?.some((link: any) =>
-                            link.type?.name?.toLowerCase().includes("block")
-                        ) || false;
+                    const blocked = fields.issuelinks?.some((link: any) =>
+                        link.type?.name?.toLowerCase().includes("block")
+                    ) || false;
 
                     // Project Lead
-                    const projectId = issue.fields?.project?.id;
+                    const projectId = fields.project?.id;
                     const projectLead = projectLeads[projectId] || { name: "Unknown", email: null, accountId: null };
 
                     const statusChanges = issue.changelog?.histories
                         ?.flatMap((h: any) => h.items)
                         ?.filter((i: any) => i.field === "status") || [];
 
-                    // New Fields Extraction
-                    const priority = issue.fields?.priority?.name || "None";
-                    const issueType = issue.fields?.issuetype?.name || "Unknown";
-                    const labels = issue.fields?.labels || [];
-                    const components = issue.fields?.components?.map((c: any) => c.name) || [];
-                    const dueDate = issue.fields?.duedate ? new Date(issue.fields.duedate).toISOString() : null;
-                    const updated = issue.fields?.updated ? new Date(issue.fields.updated).toISOString() : null;
-
-                    // People
-                    const reporter = issue.fields?.reporter?.displayName || "Unknown";
-                    const reporterEmail = issue.fields?.reporter?.emailAddress || null;
-                    const creator = issue.fields?.creator?.displayName || "Unknown";
-
-                    // Time Tracking (in seconds)
-                    const originalEstimateSeconds = issue.fields?.timeoriginalestimate || 0;
-                    const remainingEstimateSeconds = issue.fields?.timeestimate || 0;
-                    const timeSpentSeconds = issue.fields?.timespent || 0;
-
-                    // Comments (Last 5 for context)
-                    const comments = issue.fields?.comment?.comments?.slice(-5).map((c: any) => ({
+                    // Comments
+                    const comments = fields.comment?.comments?.slice(-5).map((c: any) => ({
                         author: c.author?.displayName || "Unknown",
-                        body: c.body?.content?.[0]?.content?.[0]?.text || "No text content", // Simplified rich text extraction
+                        body: c.body?.content?.[0]?.content?.[0]?.text || "No text content",
                         created: c.created
                     })) || [];
 
                     // Worklogs
-                    const worklogs = issue.fields?.worklog?.worklogs?.map((w: any) => ({
+                    const worklogs = fields.worklog?.worklogs?.map((w: any) => ({
                         author: w.author?.displayName,
                         timeSpent: w.timeSpent,
                         timeSpentSeconds: w.timeSpentSeconds,
                         started: w.started
                     })) || [];
 
-                    // Assignment Timestamp (When was this issue assigned to current assignee?)
-                    let assignedAt = issue.fields?.created ? new Date(issue.fields.created) : new Date(); // Default to created
+                    // Assignment Timestamp
+                    let assignedAt = created;
                     if (issue.changelog?.histories) {
-                        // Sort histories by created date descending (newest first)
                         const histories = issue.changelog.histories.sort((a: any, b: any) =>
                             new Date(b.created).getTime() - new Date(a.created).getTime()
                         );
-
-                        // Find the most recent 'assignee' change
                         for (const history of histories) {
                             const assigneeItem = history.items.find((item: any) => item.field === "assignee");
                             if (assigneeItem) {
-                                // If the issue is currently assigned to someone, this was the last change event
-                                // We use the history.created timestamp
                                 assignedAt = new Date(history.created);
                                 break;
                             }
@@ -299,38 +375,34 @@ export const fetchJiraAnalytics = async (req: Request, res: Response) => {
                     }
 
                     return {
-                        workspace: issue.fields?.project?.name || cloudName,
+                        workspace: fields.project?.name || cloudName,
                         ticket: issue.key,
                         assignee: assigneeName,
-                        assigneeEmail: assigneeEmail,
-                        assigneeAccountId: assigneeAccountId,
+                        assigneeEmail,
+                        assigneeAccountId,
                         status,
                         cycleTime,
                         blocked,
-                        assignedAt: assignedAt.toISOString(), // ISO string format
+                        assignedAt: assignedAt.toISOString(),
                         statusChanges,
-
-                        // New Fields
-                        priority,
-                        issueType,
-                        labels,
-                        components,
-                        dueDate,
-                        updated,
-                        reporter,
-                        reporterEmail,
-                        creator,
-                        originalEstimateSeconds,
-                        remainingEstimateSeconds,
-                        timeSpentSeconds,
+                        priority: fields.priority?.name || "None",
+                        issueType: fields.issuetype?.name || "Unknown",
+                        labels: fields.labels || [],
+                        components: fields.components?.map((c: any) => c.name) || [],
+                        dueDate: fields.duedate ? new Date(fields.duedate).toISOString() : null,
+                        updated: fields.updated ? new Date(fields.updated).toISOString() : null,
+                        reporter: fields.reporter?.displayName || "Unknown",
+                        reporterEmail: fields.reporter?.emailAddress || null,
+                        creator: fields.creator?.displayName || "Unknown",
+                        originalEstimateSeconds: fields.timeoriginalestimate || 0,
+                        remainingEstimateSeconds: fields.timeestimate || 0,
+                        timeSpentSeconds: fields.timespent || 0,
                         comments,
                         worklogs,
-
                         projectLead: projectLead.name,
                         projectLeadEmail: projectLead.email,
                         projectLeadAccountId: projectLead.accountId
                     };
-
                 });
 
                 allAnalytics.push(...workspaceAnalytics);
@@ -346,9 +418,9 @@ export const fetchJiraAnalytics = async (req: Request, res: Response) => {
                     }));
 
                     await JiraIssue.bulkWrite(bulkOps);
-                    console.log(`  Saved/Updated ${workspaceAnalytics.length} issues to MongoDB.`);
+                    console.log(`  Saved/Updated ${workspaceAnalytics.length} issues for ${cloudName}.`);
 
-                    // Update Sync State with the latest 'updated' timestamp
+                    // Update Sync State
                     const latestUpdate = workspaceAnalytics.reduce((max, issue) => {
                         const issueDate = issue.updated ? new Date(issue.updated).getTime() : 0;
                         return issueDate > max ? issueDate : max;
@@ -370,17 +442,42 @@ export const fetchJiraAnalytics = async (req: Request, res: Response) => {
 
             } catch (err: any) {
                 console.error(`Error fetching for workspace ${cloudName}:`, err.message);
-                // Continue to next workspace even if one fails
             }
-        }
-
-        res.json(allAnalytics);
+        } // End for resources
 
     } catch (error: any) {
-
-        console.error("Fetch Error Details:", error.response?.data || error.message);
-        res.status(500).send("Fetch Error");
-
+        console.error("Critical Sync Error:", error.message);
+    } finally {
+        isSyncing = false;
     }
 
+    return allAnalytics;
 };
+
+/*
+==================================
+5. Fetch Handler (for manual trigger)
+==================================
+*/
+
+export const fetchJiraAnalytics = async (req: Request, res: Response) => {
+    // If request comes from frontend, force a sync call
+    try {
+        const data = await runJiraSync();
+        res.json(data);
+    } catch (error) {
+        res.status(500).send("Error fetching data");
+    }
+};
+
+/*
+==================================
+6. Cron Job
+==================================
+*/
+
+// Schedule task to run every 8 hours
+cron.schedule('0 */8 * * *', () => {
+    console.log('Running Jira Analytics Sync Job...');
+    runJiraSync();
+});
