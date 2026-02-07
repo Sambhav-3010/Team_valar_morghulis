@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
-import passport from "../utils/passport.js";
-import { setAuthCookie, clearAuthCookie } from "../utils/cookie.js";
-import { authMiddleware, AuthRequest } from "../middleware/auth.middleware.js";
+import passport from "../utils/passport";
+import { setAuthCookie, clearAuthCookie } from "../utils/cookie";
+import { authMiddleware, AuthRequest } from "../middleware/auth.middleware";
 import dotenv from "dotenv";
 dotenv.config();
 
