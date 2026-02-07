@@ -3,7 +3,7 @@ import bodyParser from "body-parser";
 import { WebClient } from "@slack/web-api";
 import dotenv from "dotenv";
 import mongoose from "mongoose";
-import { RawEvent, Insight, IMention, IAttachment } from "./models";
+import { Insight, IMention, IAttachment } from "./models";
 
 dotenv.config();
 
@@ -30,7 +30,7 @@ async function resolveMention(id: string): Promise<IMention | null> {
             type: info.user.is_bot ? 'bot' : 'user'
         };
     } catch (error: any) {
-        if (error.data?.error === 'user_not_found') {
+        if (error?.data?.error === 'user_not_found') {
             return {
                 id: id,
                 name: "Unknown User",
@@ -43,8 +43,12 @@ async function resolveMention(id: string): Promise<IMention | null> {
     }
 }
 
-async function processEvent(rawEventId: any, event: any, teamId?: string) {
+async function processEvent(event: any, teamId?: string) {
     if (event.type !== "message" || event.bot_id) return;
+
+    if (event.subtype && ["message_changed", "message_deleted", "channel_join", "channel_leave", "group_join", "group_leave"].includes(event.subtype)) {
+        return;
+    }
 
     try {
         const userInfo = await slack.users.info({ user: event.user });
@@ -64,7 +68,7 @@ async function processEvent(rawEventId: any, event: any, teamId?: string) {
         }));
 
         const structured = {
-            eventId: rawEventId,
+            eventId: event.event_ts || event.ts,
             teamId: teamId || event.team || "",
             userId: event.user,
             userName: userInfo.user?.real_name || userInfo.user?.name || "Unknown",
@@ -74,78 +78,34 @@ async function processEvent(rawEventId: any, event: any, teamId?: string) {
             timestamp: Math.floor(parseFloat(event.ts)),
             threadTs: event.thread_ts ? Math.floor(parseFloat(event.thread_ts)) : null,
             mentions: mentions,
-            attachments: attachments,
-            raw: event
+            attachments: attachments
         };
 
         const insight = new Insight(structured);
         await insight.save();
 
-        console.log(`Structured Info Saved: ${structured.userName} mentions ${mentions.length} people and shared ${attachments.length} files.`);
+        console.log(`Structured Info Saved: ${structured.userName} (${structured.email})`);
     } catch (err: any) {
         if (err.data?.error === 'invalid_auth') {
             console.error("FATAL: Invalid Slack Auth Token. Please check your SLACK_BOT_TOKEN in .env.");
-        } else if (err.data?.error === 'user_not_found') {
-            console.warn("User not found during event processing, event recorded with truncated info.");
         } else {
             console.error("Metadata Extraction Error:", err);
         }
     }
 }
 
-async function updateAppHome(userId: string) {
-    try {
-        const totalEvents = await RawEvent.countDocuments();
-        const totalInsights = await Insight.countDocuments();
-        const recentInsights = await Insight.find().sort({ createdAt: -1 }).limit(5);
+app.get("/", (req: Request, res: Response) => {
+    res.status(200).send("Slack Intel Backend is Running 🚀");
+});
 
-        const blocks = [
-            {
-                type: "header",
-                text: { type: "plain_text", text: "🚀 Enterprise Intelligence Dashboard" }
-            },
-            {
-                type: "section",
-                fields: [
-                    { type: "mrkdwn", text: `*Total Events Captured:*\n${totalEvents}` },
-                    { type: "mrkdwn", text: `*Structured Records:*\n${totalInsights}` }
-                ]
-            },
-            { type: "divider" },
-            {
-                type: "section",
-                text: { type: "mrkdwn", text: "*Latest Informational Feed:*" }
-            }
-        ];
-
-        recentInsights.forEach(insight => {
-            const mentionText = insight.mentions.length > 0
-                ? `\n*Mentions:* ${insight.mentions.map(m => `@${m.name}`).join(', ')}`
-                : '';
-            const fileText = insight.attachments.length > 0
-                ? `\n*Files:* ${insight.attachments.map(f => `[${f.name}]`).join(', ')}`
-                : '';
-
-            blocks.push({
-                type: "section",
-                text: {
-                    type: "mrkdwn",
-                    text: `• *${insight.userName}* (${insight.email})${mentionText}${fileText}\n*Msg:* "${insight.text?.substring(0, 80)}..."`
-                }
-            } as any);
-        });
-
-        await slack.views.publish({
-            user_id: userId,
-            view: {
-                type: "home",
-                blocks: blocks as any
-            }
-        });
-    } catch (error) {
-        console.error("Error updating App Home:", error);
+app.get("/slack/oauth/callback", (req: Request, res: Response) => {
+    const { code } = req.query;
+    if (code) {
+        console.log("OAuth Code Received (Ready for exchange if needed):", code);
     }
-}
+    // For internal/org-wide installs, we just acknowledge the redirect.
+    res.status(200).send("<html><body><h1>App installed successfully!</h1><p>You can close this window and start using the bot in Slack.</p></body></html>");
+});
 
 app.post(["/", "/slack/events"], async (req: Request, res: Response) => {
     const { type, challenge, event, team_id } = req.body;
@@ -156,17 +116,8 @@ app.post(["/", "/slack/events"], async (req: Request, res: Response) => {
 
     if (event) {
         try {
-            const raw = new RawEvent({
-                type: event.type,
-                event: event,
-                raw: req.body
-            });
-            await raw.save();
-
-            if (event.type === "app_home_opened") {
-                await updateAppHome(event.user);
-            } else if (event.type === "message" && !event.bot_id) {
-                processEvent(raw._id, event, team_id);
+            if (event.type === "message" && !event.bot_id) {
+                processEvent(event, team_id);
             }
         } catch (err) {
             console.error("Error handling event:", err);
@@ -174,19 +125,6 @@ app.post(["/", "/slack/events"], async (req: Request, res: Response) => {
     }
 
     res.sendStatus(200);
-});
-
-app.post("/slack/commands", async (req: Request, res: Response) => {
-    const { command, text, user_id } = req.body;
-
-    if (command === "/intel") {
-        res.status(200).send({
-            text: "Processing your request... Check the App Home tab!"
-        });
-        await updateAppHome(user_id);
-    } else {
-        res.sendStatus(200);
-    }
 });
 
 const PORT = process.env.PORT || 3000;

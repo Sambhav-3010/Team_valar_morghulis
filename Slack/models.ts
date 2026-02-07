@@ -1,19 +1,5 @@
 import mongoose, { Schema, Document } from "mongoose";
 
-export interface IRawEvent extends Document {
-    type: string;
-    event: any;
-    raw: any;
-    createdAt: Date;
-}
-
-const RawEventSchema: Schema = new Schema({
-    type: { type: String, required: true },
-    event: { type: Schema.Types.Mixed },
-    raw: { type: Schema.Types.Mixed },
-    createdAt: { type: Date, default: Date.now }
-});
-
 export interface IMention {
     id: string;
     name: string;
@@ -27,7 +13,7 @@ export interface IAttachment {
 }
 
 export interface IInsight extends Document {
-    eventId: mongoose.Types.ObjectId;
+    eventId: string;
     teamId: string;
     userId: string;
     userName: string;
@@ -38,12 +24,11 @@ export interface IInsight extends Document {
     threadTs: number | null;
     mentions: IMention[];
     attachments: IAttachment[];
-    raw: any;
     createdAt: Date;
 }
 
 const InsightSchema: Schema = new Schema({
-    eventId: { type: Schema.Types.ObjectId, ref: 'RawEvent' },
+    eventId: { type: String, required: true },
     teamId: { type: String },
     userId: { type: String },
     userName: { type: String },
@@ -62,9 +47,7 @@ const InsightSchema: Schema = new Schema({
         name: String,
         url: String
     }],
-    raw: { type: Schema.Types.Mixed },
     createdAt: { type: Date, default: Date.now }
 });
 
-export const RawEvent = mongoose.model<IRawEvent>("RawEvent", RawEventSchema);
 export const Insight = mongoose.model<IInsight>("Insight", InsightSchema);
