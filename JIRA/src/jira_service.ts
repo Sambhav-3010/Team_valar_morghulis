@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import axios from "axios";
+import JiraIssue from "./models/JiraIssue";
 
 const CLIENT_ID = process.env.CLIENT_ID!;
 const CLIENT_SECRET = process.env.CLIENT_SECRET!;
@@ -301,6 +302,20 @@ export const fetchJiraAnalytics = async (req: Request, res: Response) => {
                 });
 
                 allAnalytics.push(...workspaceAnalytics);
+
+                // Bulk upsert into MongoDB
+                if (workspaceAnalytics.length > 0) {
+                    const bulkOps = workspaceAnalytics.map((issue: any) => ({
+                        updateOne: {
+                            filter: { ticket: issue.ticket },
+                            update: { $set: issue },
+                            upsert: true
+                        }
+                    }));
+
+                    await JiraIssue.bulkWrite(bulkOps);
+                    console.log(`  Saved/Updated ${workspaceAnalytics.length} issues to MongoDB.`);
+                }
 
             } catch (err: any) {
                 console.error(`Error fetching for workspace ${cloudName}:`, err.message);

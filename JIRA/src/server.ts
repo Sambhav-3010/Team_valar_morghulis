@@ -1,6 +1,9 @@
 import "dotenv/config";
 import express from "express";
+import connectDB from "./config/db";
 import jiraRoutes from "./jira_routes";
+
+connectDB();
 
 const app = express();
 
