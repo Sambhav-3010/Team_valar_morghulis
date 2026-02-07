@@ -3,7 +3,7 @@ import bodyParser from "body-parser";
 import { WebClient } from "@slack/web-api";
 import dotenv from "dotenv";
 import mongoose from "mongoose";
-import { RawEvent, Insight } from "./models";
+import { RawEvent, Insight, IMention, IAttachment } from "./models";
 
 dotenv.config();
 
@@ -13,38 +13,76 @@ app.use(bodyParser.urlencoded({ extended: true }));
 
 const slack = new WebClient(process.env.SLACK_BOT_TOKEN);
 
-// MongoDB Connection
-const MONGODB_URI = process.env.MONGODB_URI || "mongodb://localhost:27017/slack-intel";
+const MONGODB_URI = process.env.MONGODB_URI as string;
 mongoose.connect(MONGODB_URI)
     .then(() => console.log("Connected to MongoDB"))
     .catch(err => console.error("MongoDB Connection Error:", err));
 
-// --- AI Processing Placeholder ---
-async function processWithAI(rawEventId: any, event: any) {
-    if (event.type !== "message" || event.bot_id) return;
+async function resolveMention(id: string): Promise<IMention | null> {
+    try {
+        const info = await slack.users.info({ user: id });
+        if (!info.ok || !info.user) return null;
 
-    // In a real scenario, you'd call OpenAI/Gemini here.
-    // We'll simulate a "task detection" logic for now.
-    const text = event.text || "";
-    const isTask = text.toLowerCase().includes("todo") || text.toLowerCase().includes("assign");
-
-    const insight = new Insight({
-        eventId: rawEventId,
-        userId: event.user,
-        channelId: event.channel,
-        text: text,
-        analysis: {
-            taskName: isTask ? text.split(" ").slice(0, 5).join(" ") : undefined,
-            sentiment: "Neutral",
-            labels: isTask ? ["Task"] : ["General Communication"]
-        }
-    });
-
-    await insight.save();
-    console.log("Processed Insight Saved:", insight._id);
+        return {
+            id: id,
+            name: info.user.real_name || info.user.name || "Unknown",
+            email: info.user.profile?.email || "No Email",
+            type: info.user.is_bot ? 'bot' : 'user'
+        };
+    } catch (error) {
+        console.error(`Error resolving mention ${id}:`, error);
+        return null;
+    }
 }
 
-// --- App Home Dashboard Builder ---
+async function processEvent(rawEventId: any, event: any, teamId?: string) {
+    if (event.type !== "message" || event.bot_id) return;
+
+    try {
+        const userInfo = await slack.users.info({ user: event.user });
+
+        const mentionsRaw = event.text?.match(/<@([UW]\w+)>/g) || [];
+        const mentions: IMention[] = [];
+
+        for (const mentionStr of mentionsRaw) {
+            const id = mentionStr.replace(/[<@>]/g, '');
+            const resolved = await resolveMention(id);
+            if (resolved) mentions.push(resolved);
+        }
+
+        const attachments: IAttachment[] = (event.files || []).map((file: any) => ({
+            name: file.name,
+            url: file.url_private || file.url_private_download || ""
+        }));
+
+        const structured = {
+            eventId: rawEventId,
+            teamId: teamId || event.team || "",
+            userId: event.user,
+            userName: userInfo.user?.real_name || userInfo.user?.name || "Unknown",
+            email: userInfo.user?.profile?.email || "No Email",
+            channelId: event.channel,
+            text: event.text,
+            timestamp: Math.floor(parseFloat(event.ts)),
+            threadTs: event.thread_ts ? Math.floor(parseFloat(event.thread_ts)) : null,
+            mentions: mentions,
+            attachments: attachments,
+            raw: event
+        };
+
+        const insight = new Insight(structured);
+        await insight.save();
+
+        console.log(`Structured Info Saved: ${structured.userName} mentions ${mentions.length} people and shared ${attachments.length} files.`);
+    } catch (err: any) {
+        if (err.data?.error === 'invalid_auth') {
+            console.error("FATAL: Invalid Slack Auth Token. Please check your SLACK_BOT_TOKEN in .env.");
+        } else {
+            console.error("Metadata Extraction Error:", err);
+        }
+    }
+}
+
 async function updateAppHome(userId: string) {
     try {
         const totalEvents = await RawEvent.countDocuments();
@@ -60,22 +98,29 @@ async function updateAppHome(userId: string) {
                 type: "section",
                 fields: [
                     { type: "mrkdwn", text: `*Total Events Captured:*\n${totalEvents}` },
-                    { type: "mrkdwn", text: `*Structured Insights:*\n${totalInsights}` }
+                    { type: "mrkdwn", text: `*Structured Records:*\n${totalInsights}` }
                 ]
             },
             { type: "divider" },
             {
                 type: "section",
-                text: { type: "mrkdwn", text: "*Latest AI-Extracted Insights:*" }
+                text: { type: "mrkdwn", text: "*Latest Informational Feed:*" }
             }
         ];
 
         recentInsights.forEach(insight => {
+            const mentionText = insight.mentions.length > 0
+                ? `\n*Mentions:* ${insight.mentions.map(m => `@${m.name}`).join(', ')}`
+                : '';
+            const fileText = insight.attachments.length > 0
+                ? `\n*Files:* ${insight.attachments.map(f => `[${f.name}]`).join(', ')}`
+                : '';
+
             blocks.push({
                 type: "section",
                 text: {
                     type: "mrkdwn",
-                    text: `• *${insight.analysis.labels.join(", ")}*: "${insight.text.substring(0, 50)}..."`
+                    text: `• *${insight.userName}* (${insight.email})${mentionText}${fileText}\n*Msg:* "${insight.text?.substring(0, 80)}..."`
                 }
             } as any);
         });
@@ -92,33 +137,26 @@ async function updateAppHome(userId: string) {
     }
 }
 
-// --- Main Event Webhook ---
 app.post(["/", "/slack/events"], async (req: Request, res: Response) => {
-    const { type, challenge, event } = req.body;
+    const { type, challenge, event, team_id } = req.body;
 
-    // 1. URL Verification
     if (type === "url_verification") {
         return res.status(200).send(challenge);
     }
 
-    // 2. Event Handling
     if (event) {
         try {
-            // Save Raw Event
             const raw = new RawEvent({
                 type: event.type,
                 event: event,
                 raw: req.body
             });
             await raw.save();
-            console.log(`Saved Raw Event: ${event.type}`);
 
-            // Handle Specific Events
             if (event.type === "app_home_opened") {
                 await updateAppHome(event.user);
             } else if (event.type === "message" && !event.bot_id) {
-                // Trigger AI Processing
-                processWithAI(raw._id, event);
+                processEvent(raw._id, event, team_id);
             }
         } catch (err) {
             console.error("Error handling event:", err);
@@ -128,13 +166,12 @@ app.post(["/", "/slack/events"], async (req: Request, res: Response) => {
     res.sendStatus(200);
 });
 
-// --- Slash Command Example ---
 app.post("/slack/commands", async (req: Request, res: Response) => {
     const { command, text, user_id } = req.body;
 
     if (command === "/intel") {
         res.status(200).send({
-            text: "Processing your request... Check the App Home tab for the full dashboard!"
+            text: "Processing your request... Check the App Home tab!"
         });
         await updateAppHome(user_id);
     } else {
