@@ -3,7 +3,7 @@ import bodyParser from "body-parser";
 import { WebClient } from "@slack/web-api";
 import dotenv from "dotenv";
 import mongoose from "mongoose";
-import { Insight, IMention, IAttachment } from "./models";
+import { SlackMessage, IMention, IAttachment } from "./models";
 
 dotenv.config();
 
@@ -81,8 +81,8 @@ async function processEvent(event: any, teamId?: string) {
             attachments: attachments
         };
 
-        const insight = new Insight(structured);
-        await insight.save();
+        const slackMessage = new SlackMessage(structured);
+        await slackMessage.save();
 
         console.log(`Structured Info Saved: ${structured.userName} (${structured.email})`);
     } catch (err: any) {

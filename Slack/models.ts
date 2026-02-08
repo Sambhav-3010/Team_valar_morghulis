@@ -12,7 +12,7 @@ export interface IAttachment {
     url: string;
 }
 
-export interface IInsight extends Document {
+export interface ISlackMessage extends Document {
     eventId: string;
     teamId: string;
     userId: string;
@@ -27,7 +27,7 @@ export interface IInsight extends Document {
     createdAt: Date;
 }
 
-const InsightSchema: Schema = new Schema({
+const SlackMessageSchema: Schema = new Schema({
     eventId: { type: String, required: true },
     teamId: { type: String },
     userId: { type: String },
@@ -50,4 +50,4 @@ const InsightSchema: Schema = new Schema({
     createdAt: { type: Date, default: Date.now }
 });
 
-export const Insight = mongoose.model<IInsight>("Insight", InsightSchema);
+export const SlackMessage = mongoose.model<ISlackMessage>("SlackMessage", SlackMessageSchema);
