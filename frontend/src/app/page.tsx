@@ -1,5 +1,6 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
   Users,
@@ -7,7 +8,7 @@ import {
   Plug,
   Sparkles,
   ArrowUpRight,
-  TrendingUp,
+  Loader2,
 } from 'lucide-react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
@@ -16,57 +17,141 @@ import { SectionHeader } from '@/components/shared/SectionHeader';
 import { MetricCard } from '@/components/shared/MetricCard';
 import { InsightCard } from '@/components/ai/InsightCard';
 import { InsightStream } from '@/components/ai/InsightStream';
-import { ProjectCard } from '@/components/cards/ProjectCard';
-import { ActivityItem } from '@/components/cards/ActivityItem';
-import { SparkLine } from '@/components/charts/SparkLine';
-import {
-  orgSummary,
-  projects,
-  aiInsights,
-  activityFeed,
-  doraMetrics,
-  flowMetrics,
-  spaceMetrics,
-} from '@/data/mock';
+import { fetchHRData, fetchProductData, fetchEngineeringData, fetchInsights, type Insight } from '@/lib/api';
 
-const personaCards = [
-  {
-    href: '/hr',
-    label: 'People & Culture',
-    framework: 'SPACE',
-    description: 'Wellbeing, collaboration, and activity balance',
-    color: 'from-violet/20 to-violet/5',
-    borderColor: 'hover:border-violet/30',
-    icon: '👥',
-    stat: `${spaceMetrics.satisfaction.current}/10`,
-    statLabel: 'Satisfaction',
-  },
-  {
-    href: '/engineering',
-    label: 'Engineering',
-    framework: 'DORA',
-    description: 'Deployment frequency, lead time, reliability',
-    color: 'from-cyan/20 to-cyan/5',
-    borderColor: 'hover:border-cyan/30',
-    icon: '⚡',
-    stat: `${doraMetrics.deploymentFrequency.current}`,
-    statLabel: 'Deploys/day',
-  },
-  {
-    href: '/product',
-    label: 'Product',
-    framework: 'FLOW',
-    description: 'Velocity, efficiency, delivery confidence',
-    color: 'from-accent/20 to-accent/5',
-    borderColor: 'hover:border-accent/30',
-    icon: '📦',
-    stat: `${flowMetrics.flowVelocity.current}`,
-    statLabel: 'Items/sprint',
-  },
-];
+interface MetricsData {
+  space: {
+    satisfaction: number;
+    performance: number;
+    activity: number;
+  };
+  flow: {
+    velocity: number;
+    efficiency: number;
+    time: number;
+  };
+  dora: {
+    deploymentFrequency: number;
+    leadTime: number;
+    changeFailureRate: number;
+  };
+}
 
 export default function OverviewPage() {
-  const topInsights = aiInsights.filter(i => i.persona === 'all' || i.confidence > 0.75).slice(0, 3);
+  const [loading, setLoading] = useState(true);
+  const [insights, setInsights] = useState<Insight[]>([]);
+  const [metrics, setMetrics] = useState<MetricsData>({
+    space: { satisfaction: 0, performance: 0, activity: 0 },
+    flow: { velocity: 0, efficiency: 0, time: 0 },
+    dora: { deploymentFrequency: 0, leadTime: 0, changeFailureRate: 0 },
+  });
+  const [insightCount, setInsightCount] = useState(0);
+
+  useEffect(() => {
+    async function loadData() {
+      setLoading(true);
+
+      try {
+        const hrData = await fetchHRData();
+        if (hrData?.metrics) {
+          setMetrics(prev => ({
+            ...prev,
+            space: {
+              satisfaction: hrData.metrics.satisfaction?.current || 0,
+              performance: hrData.metrics.performance?.current || 0,
+              activity: hrData.metrics.activity?.current || 0,
+            }
+          }));
+        }
+      } catch (err) {
+        console.error('Failed to fetch HR data:', err);
+      }
+
+      try {
+        const productData = await fetchProductData();
+        if (productData?.metrics) {
+          setMetrics(prev => ({
+            ...prev,
+            flow: {
+              velocity: productData.metrics.flowVelocity?.current || 0,
+              efficiency: productData.metrics.flowEfficiency?.current || 0,
+              time: productData.metrics.flowTime?.current || 0,
+            }
+          }));
+        }
+      } catch (err) {
+        console.error('Failed to fetch product data:', err);
+      }
+
+      try {
+        const engData = await fetchEngineeringData();
+        if (engData?.metrics) {
+          setMetrics(prev => ({
+            ...prev,
+            dora: {
+              deploymentFrequency: engData.metrics.deploymentFrequency?.current || 0,
+              leadTime: engData.metrics.leadTime?.current || 0,
+              changeFailureRate: engData.metrics.changeFailureRate?.current || 0,
+            }
+          }));
+        }
+      } catch (err) {
+        console.error('Failed to fetch engineering data:', err);
+      }
+
+      try {
+        const allInsights = await fetchInsights(undefined, 10);
+        setInsights(allInsights.slice(0, 3));
+        setInsightCount(allInsights.length);
+      } catch (err) {
+        console.error('Failed to fetch insights:', err);
+      }
+
+      setLoading(false);
+    }
+
+    loadData();
+  }, []);
+
+  const personaCards = [
+    {
+      href: '/hr',
+      label: 'People & Culture',
+      framework: 'SPACE',
+      description: 'Wellbeing, collaboration, and activity balance',
+      color: 'from-violet/20 to-violet/5',
+      borderColor: 'hover:border-violet/30',
+      icon: '👥',
+      stat: `${metrics.space.satisfaction}/10`,
+      statLabel: 'Satisfaction',
+    },
+    {
+      href: '/engineering',
+      label: 'Engineering',
+      framework: 'DORA',
+      description: 'Deployment frequency, lead time, reliability',
+      color: 'from-cyan/20 to-cyan/5',
+      borderColor: 'hover:border-cyan/30',
+      icon: '⚡',
+      stat: `${metrics.dora.deploymentFrequency}`,
+      statLabel: 'Deploys/day',
+    },
+    {
+      href: '/product',
+      label: 'Product',
+      framework: 'FLOW',
+      description: 'Velocity, efficiency, delivery confidence',
+      color: 'from-accent/20 to-accent/5',
+      borderColor: 'hover:border-accent/30',
+      icon: '📦',
+      stat: `${metrics.flow.velocity}`,
+      statLabel: 'Items/sprint',
+    },
+  ];
+
+  const summaryMessage = loading
+    ? 'Loading organization data...'
+    : `Organization overview: ${metrics.space.satisfaction}/10 satisfaction score, ${metrics.dora.deploymentFrequency} deploys/day, and ${metrics.flow.velocity} items delivered per sprint. ${insightCount > 0 ? `${insightCount} AI insights generated.` : ''}`;
 
   return (
     <div className="max-w-[1400px] mx-auto">
@@ -75,129 +160,95 @@ export default function OverviewPage() {
         description="A unified view across your people, projects, and engineering health. AI insights surface what needs your attention."
       />
 
-      {/* ── AI Summary Stream ── */}
       <div className="mb-10">
-        <InsightStream
-          message="This week shows strong momentum. Deployment frequency hit a new high at 4.2/day with no proportional increase in failures. However, the Mobile App MVP continues to fall behind schedule, and Nina Okafor on Infrastructure may benefit from a check-in — her collaboration patterns have shifted notably."
-          typing
-        />
+        <InsightStream message={summaryMessage} typing />
       </div>
 
-      {/* ── Persona Lenses ── */}
       <SectionHeader
         title="Lenses"
         subtitle="Choose a perspective to explore your data"
       />
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-12">
-        {personaCards.map((card, i) => (
-          <motion.div
-            key={card.href}
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: i * 0.1, ease: [0.23, 1, 0.32, 1] }}
-          >
-            <Link href={card.href} className="block group">
-              <div className={cn(
-                'card card-interactive p-6 bg-gradient-to-br',
-                card.color,
-                card.borderColor,
-              )}>
-                <div className="flex items-start justify-between mb-4">
-                  <div>
-                    <span className="text-2xl">{card.icon}</span>
-                    <h3 className="text-base font-display font-semibold text-text-primary mt-2">
-                      {card.label}
-                    </h3>
-                    <span className="text-[10px] font-mono uppercase tracking-widest text-text-ghost">
-                      {card.framework} Framework
-                    </span>
+      {loading ? (
+        <div className="flex items-center justify-center py-16">
+          <Loader2 className="w-8 h-8 text-accent animate-spin" />
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-12">
+          {personaCards.map((card, i) => (
+            <motion.div
+              key={card.href}
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: i * 0.1, ease: [0.23, 1, 0.32, 1] }}
+            >
+              <Link href={card.href} className="block group">
+                <div className={cn(
+                  'card card-interactive p-6 bg-gradient-to-br',
+                  card.color,
+                  card.borderColor,
+                )}>
+                  <div className="flex items-start justify-between mb-4">
+                    <div>
+                      <span className="text-2xl">{card.icon}</span>
+                      <h3 className="text-base font-display font-semibold text-text-primary mt-2">
+                        {card.label}
+                      </h3>
+                      <span className="text-[10px] font-mono uppercase tracking-widest text-text-ghost">
+                        {card.framework} Framework
+                      </span>
+                    </div>
+                    <ArrowUpRight className="w-4 h-4 text-text-ghost group-hover:text-text-secondary transition-colors" />
                   </div>
-                  <ArrowUpRight className="w-4 h-4 text-text-ghost group-hover:text-text-secondary transition-colors" />
+                  <p className="text-sm text-text-secondary mb-4">{card.description}</p>
+                  <div className="flex items-baseline gap-1.5 pt-3 border-t border-border-subtle">
+                    <span className="text-xl font-display font-semibold text-text-primary">{card.stat}</span>
+                    <span className="text-xs text-text-ghost font-mono">{card.statLabel}</span>
+                  </div>
                 </div>
-                <p className="text-sm text-text-secondary mb-4">{card.description}</p>
-                <div className="flex items-baseline gap-1.5 pt-3 border-t border-border-subtle">
-                  <span className="text-xl font-display font-semibold text-text-primary">{card.stat}</span>
-                  <span className="text-xs text-text-ghost font-mono">{card.statLabel}</span>
-                </div>
-              </div>
-            </Link>
-          </motion.div>
-        ))}
-      </div>
+              </Link>
+            </motion.div>
+          ))}
+        </div>
+      )}
 
-      {/* ── Quick Metrics ── */}
-      <SectionHeader title="Organization Pulse" subtitle="Key metrics at a glance" />
+      <SectionHeader title="Key Metrics" subtitle="Real-time data from backend" />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-12">
         <MetricCard
-          label="People"
-          value={orgSummary.totalPeople}
-          unit="tracked"
+          label="Satisfaction"
+          value={metrics.space.satisfaction}
+          unit="/10"
           delay={0}
           icon={<Users className="w-4 h-4 text-violet" />}
           accentColor="bg-violet-dim"
         />
         <MetricCard
-          label="Projects"
-          value={orgSummary.totalProjects}
-          unit="active"
+          label="Deploy Freq"
+          value={metrics.dora.deploymentFrequency}
+          unit="/day"
           delay={1}
           icon={<FolderKanban className="w-4 h-4 text-cyan" />}
           accentColor="bg-cyan-dim"
         />
         <MetricCard
-          label="Integrations"
-          value={orgSummary.activeIntegrations}
-          unit="connected"
+          label="Flow Velocity"
+          value={metrics.flow.velocity}
+          unit="items"
           delay={2}
           icon={<Plug className="w-4 h-4 text-emerald" />}
           accentColor="bg-emerald-dim"
         />
         <MetricCard
           label="AI Insights"
-          value={orgSummary.insightsGenerated}
-          unit="this week"
+          value={insightCount}
+          unit="generated"
           delay={3}
           icon={<Sparkles className="w-4 h-4 text-accent" />}
           accentColor="bg-accent-dim"
         />
       </div>
 
-      {/* ── Two-column: Projects + Activity ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-8 mb-12">
-        {/* Projects */}
-        <div className="lg:col-span-3">
-          <SectionHeader
-            title="Projects"
-            subtitle={`${projects.filter(p => p.status === 'on-track').length} on track · ${projects.filter(p => p.status === 'at-risk').length} at risk`}
-            action={
-              <Link href="/product" className="text-xs text-accent hover:text-accent/80 transition-colors font-medium">
-                View all →
-              </Link>
-            }
-          />
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {projects.slice(0, 4).map((project, i) => (
-              <ProjectCard key={project.id} project={project} delay={i} />
-            ))}
-          </div>
-        </div>
-
-        {/* Activity Feed */}
-        <div className="lg:col-span-2">
-          <SectionHeader title="Recent Activity" subtitle="Live feed from all sources" />
-          <div className="card p-5">
-            <div className="divide-y divide-border-subtle">
-              {activityFeed.map((item, i) => (
-                <ActivityItem key={item.id} item={item} delay={i} />
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ── AI Insights ── */}
       <SectionHeader
         title="Recent Insights"
         subtitle="AI-generated observations from your data"
@@ -208,11 +259,17 @@ export default function OverviewPage() {
         }
       />
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {topInsights.map((insight, i) => (
-          <InsightCard key={insight.id} insight={insight} delay={i} />
-        ))}
-      </div>
+      {insights.length > 0 ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {insights.map((insight, i) => (
+            <InsightCard key={insight.id} insight={insight as any} delay={i} />
+          ))}
+        </div>
+      ) : (
+        <div className="text-center py-8 text-text-tertiary text-sm">
+          No insights available. Run the pipeline to generate insights.
+        </div>
+      )}
     </div>
   );
 }

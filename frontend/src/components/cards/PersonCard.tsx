@@ -18,8 +18,8 @@ interface PersonCardProps {
 }
 
 export function PersonCard({ person, delay = 0 }: PersonCardProps) {
-  const activity = activityConfig[person.activityLevel];
-  const scoreColor = useHealthColor(person.spaceScore);
+  const activity = activityConfig[person.activityLevel] || activityConfig.balanced;
+  const scoreColor = useHealthColor(person.spaceScore || 50);
 
   return (
     <motion.div

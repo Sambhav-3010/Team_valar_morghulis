@@ -91,4 +91,42 @@ router.get('/engineering', async (req, res) => {
     }
 });
 
+/**
+ * GET /api/analytics/insights
+ * Returns all AI insights with optional filters
+ */
+router.get('/insights', async (req, res) => {
+    try {
+        const { orgId, persona, limit } = req.query;
+
+        const query: any = {};
+        if (orgId) query.orgId = orgId;
+        if (persona) query.persona = persona;
+
+        const limitNum = limit ? parseInt(limit as string, 10) : 20;
+
+        const insights = await Insight.find(query)
+            .sort({ generatedAt: -1 })
+            .limit(limitNum);
+
+        res.json({
+            success: true,
+            insights: insights.map(i => ({
+                id: i._id,
+                category: i.category,
+                persona: i.persona,
+                title: i.title,
+                body: i.body,
+                confidence: i.confidence,
+                timestamp: i.generatedAt,
+                relatedMetric: i.relatedMetric,
+                source: i.source
+            }))
+        });
+    } catch (err) {
+        console.error('Error fetching insights:', err);
+        res.status(500).json({ error: 'Failed to fetch insights' });
+    }
+});
+
 export default router;

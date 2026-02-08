@@ -14,7 +14,7 @@ const statusConfig = {
 };
 
 export function StatusBadge({ status }: StatusBadgeProps) {
-  const config = statusConfig[status];
+  const config = statusConfig[status] || statusConfig['on-track'];
 
   return (
     <span className={cn(

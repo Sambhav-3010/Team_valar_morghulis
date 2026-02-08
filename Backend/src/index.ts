@@ -5,6 +5,7 @@ import mongoose from "mongoose";
 import passport from "./utils/passport";
 import authRoutes from "./routes/auth";
 import analyticsRoutes from "./routes/analyticsRoutes";
+import analyticsV2Routes from "./routes/analytics";
 import dotenv from "dotenv";
 dotenv.config();
 
@@ -15,7 +16,7 @@ const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3000";
 
 app.use(
   cors({
-    origin: FRONTEND_URL,
+    origin: [FRONTEND_URL, "http://localhost:3000", "http://localhost:3001"],
     credentials: true,
   })
 );
@@ -25,6 +26,7 @@ app.use(passport.initialize());
 
 app.use("/auth", authRoutes);
 app.use("/api/analytics", analyticsRoutes);
+app.use("/api/v2", analyticsV2Routes);
 
 app.get("/", (req, res) => {
   res.send("Golden Data Layer Backend - Analytics API Ready");

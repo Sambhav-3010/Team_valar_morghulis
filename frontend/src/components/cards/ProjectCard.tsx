@@ -6,13 +6,23 @@ import { StatusBadge } from '@/components/shared/StatusBadge';
 import { useHealthColor, useChartColors } from '@/hooks/useThemeColors';
 import type { Project } from '@/data/mock';
 
+interface EnrichedProject extends Partial<Project> {
+  name: string;
+  team?: string;
+  status?: 'on-track' | 'at-risk' | 'behind' | 'completed';
+  progress?: number;
+  health?: number;
+  deadline?: string;
+  lead?: string;
+}
+
 interface ProjectCardProps {
-  project: Project;
+  project: EnrichedProject;
   delay?: number;
 }
 
 export function ProjectCard({ project, delay = 0 }: ProjectCardProps) {
-  const healthColor = useHealthColor(project.health);
+  const healthColor = useHealthColor(project.health || 50);
   const chartColors = useChartColors();
 
   return (
@@ -25,9 +35,9 @@ export function ProjectCard({ project, delay = 0 }: ProjectCardProps) {
       <div className="flex items-start justify-between mb-4">
         <div>
           <h3 className="text-sm font-display font-medium text-text-primary">{project.name}</h3>
-          <p className="text-xs text-text-ghost font-mono mt-0.5">{project.team}</p>
+          <p className="text-xs text-text-ghost font-mono mt-0.5">{project.team || 'Team'}</p>
         </div>
-        <StatusBadge status={project.status} />
+        <StatusBadge status={project.status || 'on-track'} />
       </div>
 
       {/* Progress bar */}
@@ -48,7 +58,7 @@ export function ProjectCard({ project, delay = 0 }: ProjectCardProps) {
       </div>
 
       {/* Health indicator */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 mb-3">
         <span className="text-[10px] font-mono uppercase tracking-wider text-text-ghost">Health</span>
         <div className="flex-1 flex items-center gap-1.5">
           <div className="flex gap-[2px]">
@@ -57,7 +67,7 @@ export function ProjectCard({ project, delay = 0 }: ProjectCardProps) {
                 key={i}
                 className="w-1.5 h-3 rounded-[1px]"
                 style={{
-                  backgroundColor: i < Math.round(project.health / 10)
+                  backgroundColor: i < Math.round((project.health || 50) / 10)
                     ? healthColor
                     : chartColors.healthInactive,
                 }}
@@ -65,9 +75,25 @@ export function ProjectCard({ project, delay = 0 }: ProjectCardProps) {
             ))}
           </div>
           <span className="text-xs font-mono" style={{ color: healthColor }}>
-            {project.health}
+            {project.health || 50}
           </span>
         </div>
+      </div>
+
+      {/* Timeline info */}
+      <div className="flex items-center justify-between text-xs border-t border-border-subtle pt-3 mt-1">
+        {project.deadline && (
+          <div className="flex items-center gap-1.5">
+            <span className="text-text-ghost">Due:</span>
+            <span className="text-text-secondary font-mono">{project.deadline}</span>
+          </div>
+        )}
+        {project.lead && (
+          <div className="flex items-center gap-1.5">
+            <span className="text-text-ghost">Lead:</span>
+            <span className="text-text-secondary">{project.lead}</span>
+          </div>
+        )}
       </div>
     </motion.div>
   );
