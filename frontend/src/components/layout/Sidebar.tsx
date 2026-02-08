@@ -61,7 +61,7 @@ export function Sidebar() {
               className="flex flex-col overflow-hidden"
             >
               <span className="font-display font-semibold text-sm text-text-primary tracking-tight">
-                Synth
+                PulseIQ
               </span>
               <span className="text-[10px] text-text-tertiary font-mono uppercase tracking-widest">
                 Insights

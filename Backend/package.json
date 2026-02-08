@@ -1,7 +1,7 @@
 {
-  "name": "backend",
+  "name": "pulseiq-backend",
   "version": "1.0.0",
-  "description": "",
+  "description": "PulseIQ - AI-Driven Enterprise Delivery & Workforce Intelligence",
   "main": "index.js",
   "scripts": {
     "dev": "ts-node src/index.ts",

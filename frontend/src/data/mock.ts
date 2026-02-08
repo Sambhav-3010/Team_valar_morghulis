@@ -1,5 +1,5 @@
 // ──────────────────────────────────────────
-// Mock data for the Synth Insights platform
+// Mock data for the PulseIQ platform
 // ──────────────────────────────────────────
 
 export type Integration = {

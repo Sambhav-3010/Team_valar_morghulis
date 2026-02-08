@@ -4,7 +4,7 @@ import { AppShell } from '@/components/layout/AppShell';
 import { ThemeProvider } from '@/components/providers/ThemeProvider';
 
 export const metadata: Metadata = {
-  title: 'Synth — Work Intelligence Platform',
+  title: 'PulseIQ — AI-Driven Enterprise Intelligence',
   description: 'AI-enabled analytics and insights from your work tools',
 };
 
@@ -18,7 +18,7 @@ export default function RootLayout({
       <head>
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem('synth-theme');var r=t==='light'?'light':t==='system'?window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light':'dark';document.documentElement.className=r}catch(e){}})()`,
+            __html: `(function(){try{var t=localStorage.getItem('pulseiq-theme');var r=t==='light'?'light':t==='system'?window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light':'dark';document.documentElement.className=r}catch(e){}})()`,
           }}
         />
       </head>

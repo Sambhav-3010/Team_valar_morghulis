@@ -23,7 +23,7 @@ export function InsightStream({ message, typing = false }: InsightStreamProps) {
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-2">
-            <span className="text-xs font-display font-medium text-accent">Synth AI</span>
+            <span className="text-xs font-display font-medium text-accent">PulseIQ AI</span>
             <span className="text-[10px] font-mono text-text-ghost">just now</span>
           </div>
           <p className={cn(
