@@ -118,7 +118,7 @@ export async function transformJiraIssues(
                         source: 'jira',
                         activityType: 'ticket_created',
                         actorEmail: issue.reporterEmail,
-                        projectAlias: issue.workspace || 'unknown',
+                        projectAlias: issue.ticket ? issue.ticket.split('-')[0] : (issue.workspace || 'unknown'),
                         timestamp: issue.createdAt || issue.assignedAt || new Date(),
                         sourceRefId: createdRefId,
                         metadata: {
