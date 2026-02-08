@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 import { Project } from '../src/models/Project';
 import { Activity } from '../src/models/Activity';
 import { Insight } from '../src/models/Insight';
+import { Identity } from '../src/models/Identity';
 
 // Load env vars
 dotenv.config();
@@ -18,7 +19,7 @@ const connectDB = async () => {
     }
 };
 
-// Define Source Models (copied from transformers)
+// Define Source Models
 const SlackMessageSchema = new mongoose.Schema({
     eventId: String,
     teamId: String,
@@ -52,6 +53,9 @@ const JiraIssueSchema = new mongoose.Schema({
     status: String,
     statusChanges: [new mongoose.Schema({ fromString: String, toString: String }, { _id: false })],
     issueType: String,
+    priority: String,
+    labels: [String],
+    components: [String],
     updatedAt: Date,
     reporterEmail: String,
     createdAt: Date
@@ -79,163 +83,188 @@ const TransformStateSchema = new mongoose.Schema({
 }, { timestamps: true });
 const TransformState = mongoose.models.TransformState || mongoose.model('TransformState', TransformStateSchema);
 
+// Helper to generate random date within last 30 days
+const getRandomDate = () => {
+    const end = new Date();
+    const start = new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000);
+    return new Date(start.getTime() + Math.random() * (end.getTime() - start.getTime()));
+};
+
 // Seed Data
 const seed = async () => {
-    await connectDB();
+    try {
+        console.log('Starting seed process...');
+        await connectDB();
 
-    console.log('Clearing old test data...');
-    // Clear TransformState to ensure transformers run from scratch
-    await TransformState.deleteMany({});
-    console.log('Cleared TransformState.');
+        console.log('Clearing old data...');
+        // Clear everything
+        await Project.deleteMany({});
+        console.log('Cleared Projects');
+        await Activity.deleteMany({});
+        console.log('Cleared Activities');
+        await Insight.deleteMany({});
+        console.log('Cleared Insights');
+        await Identity.deleteMany({});
+        console.log('Cleared Identities');
+        await SlackMessage.deleteMany({});
+        console.log('Cleared SlackMessages');
+        await WebhookEvent.deleteMany({});
+        console.log('Cleared WebhookEvents');
+        await JiraIssue.deleteMany({});
+        console.log('Cleared JiraIssues');
+        await EmailMetadata.deleteMany({});
+        console.log('Cleared EmailMetadata');
+        await TransformState.deleteMany({});
+        console.log('Cleared TransformState');
 
-    // Clear existing data
-    console.log('Clearing projects and source data...');
-    await Project.deleteMany({});
-    await Activity.deleteMany({});
-    await SlackMessage.deleteMany({});
-    await WebhookEvent.deleteMany({});
-    await JiraIssue.deleteMany({});
-    await EmailMetadata.deleteMany({});
+        console.log('Seeding Identities...');
+        const orgId = 'acme-corp';
 
-    console.log('Seeding Projects...');
-    const orgId = 'valar-morghulis';
-
-    // Project Phoenix
-    await Project.create({
-        projectId: 'proj_phoenix',
-        name: 'Project Phoenix',
-        orgId,
-        description: 'A revolutionary new AI platform',
-        aliases: {
-            github: ['org/project-phoenix'],
-            slack: ['channel_phoenix'],
-            jira: ['PHOENIX'],
-            email: ['project phoenix']
-        }
-    });
-
-    // Project Orion
-    await Project.create({
-        projectId: 'proj_orion',
-        name: 'Project Orion',
-        orgId,
-        description: 'Next-gen satellite tracking system',
-        aliases: {
-            github: ['org/project-orion'],
-            slack: ['channel_orion'],
-            jira: ['ORION'],
-            email: ['project orion']
-        }
-    });
-
-    console.log('Seeding Slack Messages...');
-    await SlackMessage.create([
-        {
-            eventId: 'evt_phx_1',
-            teamId: orgId,
-            email: 'alice@valar.com',
-            channelId: 'channel_phoenix',
-            text: 'Hey team, the new API endpoints for Phoenix are ready for review.',
-            timestamp: Date.now() / 1000,
-            createdAt: new Date()
-        },
-        {
-            eventId: 'evt_phx_2',
-            teamId: orgId,
-            email: 'bob@valar.com',
-            channelId: 'channel_phoenix',
-            text: 'Great! I will take a look this afternoon. Are the docs updated?',
-            timestamp: Date.now() / 1000 + 60,
-            createdAt: new Date()
-        },
-        {
-            eventId: 'evt_orion_1',
-            teamId: orgId,
-            email: 'charlie@valar.com',
-            channelId: 'channel_orion',
-            text: 'Orion satellite link is unstable. We need to investigate the signal logs.',
-            timestamp: Date.now() / 1000,
-            createdAt: new Date()
-        }
-    ]);
-
-    console.log('Seeding GitHub Events...');
-    await WebhookEvent.create([
-        {
-            eventType: 'push',
-            repositoryFullName: 'org/project-phoenix',
-            senderLogin: 'alice_dev',
-            payload: {
-                ref: 'refs/heads/main',
-                commits: [{ message: 'feat: add new phoenix endpoints' }]
+        await Identity.create([
+            {
+                orgId,
+                primaryEmail: 'alice@acme.com',
+                displayName: 'Alice Engineer',
+                githubLogin: 'alice-dev',
+                slackUserId: 'U_ALICE',
+                defaultProjectId: 'proj-alpha'
             },
-            createdAt: new Date()
-        },
-        {
-            eventType: 'pull_request',
-            eventAction: 'opened',
-            repositoryFullName: 'org/project-orion',
-            senderLogin: 'charlie_dev',
-            payload: {
-                pull_request: {
-                    number: 42,
-                    title: 'fix: stabilize signal processing',
-                    state: 'open'
-                }
+            {
+                orgId,
+                primaryEmail: 'bob@acme.com',
+                displayName: 'Bob Manager',
+                jiraAccountId: 'ACC_BOB',
+                defaultProjectId: 'proj-alpha'
             },
-            createdAt: new Date()
-        }
-    ]);
+            {
+                orgId,
+                primaryEmail: 'charlie@acme.com',
+                displayName: 'Charlie Dev',
+                githubLogin: 'charlie-dev',
+                slackUserId: 'U_CHARLIE',
+                defaultProjectId: 'proj-beta'
+            }
+        ]);
+        console.log('Identities seeded');
 
-    console.log('Seeding Jira Issues...');
-    await JiraIssue.create([
-        {
-            workspace: 'PHOENIX',
-            ticket: 'PHOENIX-101',
-            assigneeEmail: 'alice@valar.com',
-            status: 'In Progress',
-            issueType: 'Story',
-            reporterEmail: 'manager@valar.com',
-            createdAt: new Date(),
-            updatedAt: new Date()
-        },
-        {
-            workspace: 'ORION',
-            ticket: 'ORION-55',
-            assigneeEmail: 'charlie@valar.com',
-            status: 'Done',
-            statusChanges: [{ fromString: 'In Progress', toString: 'Done' }],
-            issueType: 'Bug',
-            reporterEmail: 'director@valar.com',
-            createdAt: new Date(),
-            updatedAt: new Date()
-        }
-    ]);
-
-    console.log('Seeding Emails...');
-    await EmailMetadata.create([
-        {
+        console.log('Seeding Projects...');
+        await Project.create({
+            projectId: 'proj-alpha',
+            name: 'Project Alpha',
             orgId,
-            userEmail: 'manager@valar.com',
-            messageId: 'msg_123',
-            subject: 'Project Phoenix Timeline Update',
-            body: 'We are on track for the Q3 release of Phoenix. Keep up the good work!',
-            timestamp: Date.now(),
-            createdAt: new Date()
-        },
-        {
-            orgId,
-            userEmail: 'director@valar.com',
-            messageId: 'msg_456',
-            subject: 'Urgent: Project Orion Budget',
-            body: 'We need to discuss the hardware budget for Orion next week.',
-            timestamp: Date.now(),
-            createdAt: new Date()
-        }
-    ]);
+            description: 'Main flagship product',
+            aliases: {
+                github: ['acme-corp/alpha-repo'],
+                slack: ['C101'],
+                jira: ['ALPHA'],
+                email: ['alpha']
+            }
+        });
 
-    console.log('Seeding complete!');
-    process.exit(0);
+        await Project.create({
+            projectId: 'proj-beta',
+            name: 'Project Beta',
+            orgId,
+            description: 'Next-gen backend system',
+            aliases: {
+                github: ['acme-corp/beta-backend'],
+                slack: ['C102'],
+                jira: ['BETA'],
+                email: ['beta']
+            }
+        });
+        console.log('Projects seeded');
+
+        console.log('Seeding Slack Messages (50 items)...');
+        const slackMessages = [];
+        for (let i = 0; i < 50; i++) {
+            const isAlpha = i % 2 === 0;
+            const channelId = isAlpha ? 'C101' : 'C102';
+            const date = getRandomDate();
+
+            slackMessages.push({
+                eventId: `evt_${i}`,
+                teamId: orgId, // Using acme-corp to match user's teamId usage
+                email: isAlpha ? 'alice@acme.com' : 'charlie@acme.com',
+                channelId: channelId,
+                text: `Update on ${isAlpha ? 'Alpha' : 'Beta'} feature #${i}. We are making progress!`,
+                timestamp: Math.floor(date.getTime() / 1000),
+                userId: isAlpha ? 'U_ALICE' : 'U_CHARLIE',
+                userName: isAlpha ? 'alice' : 'charlie',
+                createdAt: date
+            });
+        }
+        await SlackMessage.insertMany(slackMessages);
+        console.log('Slack Messages seeded');
+
+        console.log('Seeding GitHub Events (50 items)...');
+        const githubEvents = [];
+        for (let i = 0; i < 50; i++) {
+            const isAlpha = i % 2 === 0;
+            const repo = isAlpha ? 'acme-corp/alpha-repo' : 'acme-corp/beta-backend';
+            const date = getRandomDate();
+            const type = i % 3 === 0 ? 'pull_request' : 'push';
+
+            if (type === 'push') {
+                githubEvents.push({
+                    eventType: 'push',
+                    repositoryFullName: repo,
+                    senderLogin: isAlpha ? 'alice-dev' : 'charlie-dev',
+                    payload: {
+                        ref: 'refs/heads/main',
+                        commits: [{ message: `feat: update ${i}` }]
+                    },
+                    createdAt: date
+                });
+            } else {
+                githubEvents.push({
+                    eventType: 'pull_request',
+                    eventAction: 'opened',
+                    repositoryFullName: repo,
+                    senderLogin: isAlpha ? 'alice-dev' : 'charlie-dev',
+                    payload: {
+                        pull_request: {
+                            number: i,
+                            title: `feat: feature ${i}`,
+                            state: 'open'
+                        }
+                    },
+                    createdAt: date
+                });
+            }
+        }
+        await WebhookEvent.insertMany(githubEvents);
+        console.log('GitHub Events seeded');
+
+        console.log('Seeding Jira Issues (50 items)...');
+        const jiraIssues = [];
+        for (let i = 0; i < 50; i++) {
+            const isAlpha = i % 2 === 0;
+            const projectKey = isAlpha ? 'ALPHA' : 'BETA';
+            const date = getRandomDate();
+
+            jiraIssues.push({
+                workspace: orgId, // Using acme-corp to match transformer orgId logic
+                ticket: `${projectKey}-${i + 100}`,
+                assigneeEmail: isAlpha ? 'alice@acme.com' : 'charlie@acme.com',
+                status: i % 3 === 0 ? 'Done' : 'In Progress',
+                issueType: i % 4 === 0 ? 'Bug' : 'Story',
+                priority: i % 5 === 0 ? 'High' : 'Medium',
+                reporterEmail: 'bob@acme.com',
+                statusChanges: i % 3 === 0 ? [{ fromString: 'In Progress', toString: 'Done' }] : [],
+                createdAt: date,
+                updatedAt: date
+            });
+        }
+        await JiraIssue.insertMany(jiraIssues);
+        console.log('Jira Issues seeded');
+
+        console.log('Seeding complete!');
+        process.exit(0);
+    } catch (err) {
+        console.error('SEEDING FAILED:', err);
+        process.exit(1);
+    }
 };
 
 seed();

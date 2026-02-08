@@ -4,7 +4,7 @@ import cookieParser from "cookie-parser";
 import mongoose from "mongoose";
 import passport from "./utils/passport";
 import authRoutes from "./routes/auth";
-import analyticsRoutes from "./routes/analyticsRoutes";
+import analyticsRoutes from "./routes/analytics";
 import dotenv from "dotenv";
 dotenv.config();
 

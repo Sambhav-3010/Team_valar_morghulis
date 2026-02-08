@@ -36,34 +36,34 @@ const run = async () => {
         console.log('Activities by Source:', bySource);
     }
 
-    console.log('\n--- Generating Insights for Project Phoenix ---');
-    const orgId = 'valar-morghulis';
-    const phoenixId = 'org/project-phoenix'; // Using alias as ID for now based on transformer logic
+    console.log('\n--- Generating Insights for Project Alpha ---');
+    const orgId = 'acme-corp';
+    const alphaId = 'acme-corp/alpha-repo'; // Using alias as ID for now
     const startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // Last 30 days
-    const endDate = new Date(); 
+    const endDate = new Date();
 
     try {
         console.log('Generating Product Insights...');
-        const productInsights = await generateProductInsights(orgId, phoenixId, startDate, endDate);
+        const productInsights = await generateProductInsights(orgId, alphaId, startDate, endDate);
         console.log('Product Insights:', JSON.stringify(productInsights, null, 2));
 
         console.log('Generating Engineering Insights...');
-        const engInsights = await generateEngineeringInsights(orgId, phoenixId, startDate, endDate);
+        const engInsights = await generateEngineeringInsights(orgId, alphaId, startDate, endDate);
         console.log('Engineering Insights:', JSON.stringify(engInsights, null, 2));
 
     } catch (err) {
-        console.error('Error generating Phoenix insights:', err);
+        console.error('Error generating Alpha insights:', err);
     }
 
-    console.log('\n--- Generating Insights for Project Orion ---');
-    const orionId = 'org/project-orion';
+    console.log('\n--- Generating Insights for Project Beta ---');
+    const betaId = 'acme-corp/beta-backend';
 
     try {
         console.log('Generating Product Insights...');
-        const productInsights = await generateProductInsights(orgId, orionId, startDate, endDate);
+        const productInsights = await generateProductInsights(orgId, betaId, startDate, endDate);
         console.log('Product Insights:', JSON.stringify(productInsights, null, 2));
     } catch (err) {
-        console.error('Error generating Orion insights:', err);
+        console.error('Error generating Beta insights:', err);
     }
 
     console.log('\n--- Generating HR Insights (Org Level) ---');
