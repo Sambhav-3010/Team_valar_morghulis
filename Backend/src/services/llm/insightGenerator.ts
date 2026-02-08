@@ -22,34 +22,52 @@ export interface InsightGenerationResult {
  * Helper to extract JSON from LLM response
  */
 function extractJSON(text: string): any {
+    console.log('--- Raw LLM Response ---');
+    console.log(text);
+    console.log('------------------------');
+
     // Remove comments (single line // and multi-line /* */)
     const storedText = text;
-    text = text.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+    // Be careful with URLs in text, standard regex for comments might be too aggressive if not careful.
+    // For now, let's trust the LLM to output valid JSON mostly.
 
     try {
-        // 1. Try direct parse
-        return JSON.parse(text);
-    } catch {
-        // 2. Try extracting from markdown code blocks
+        // 1. Try extracting from markdown code blocks first (most common)
         const match = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
         if (match) {
-            try { return JSON.parse(match[1]); } catch { }
+            try { return JSON.parse(match[1]); } catch (e) { console.error('Failed to parse code block JSON:', e); }
         }
-        // 3. Try finding array brackets
-        const start = text.indexOf('[');
-        const end = text.lastIndexOf(']');
-        if (start !== -1 && end !== -1 && end > start) {
-            try { return JSON.parse(text.substring(start, end + 1)); } catch { }
-        }
-        // 4. Try finding object braces
-        const startObj = text.indexOf('{');
-        const endObj = text.lastIndexOf('}');
-        if (startObj !== -1 && endObj !== -1 && endObj > startObj) {
-            try { return JSON.parse(text.substring(startObj, endObj + 1)); } catch { }
-        }
-        // Fallback: try parsing the original text just in case comment stripping broke something (unlikely but safe)
-        try { return JSON.parse(storedText); } catch { }
 
+        // 2. Try looking for the outermost array or object
+        // We want to find the first '[' or '{' and the last ']' or '}'
+        const firstOpenBrace = text.indexOf('{');
+        const firstOpenBracket = text.indexOf('[');
+        const lastCloseBrace = text.lastIndexOf('}');
+        const lastCloseBracket = text.lastIndexOf(']');
+
+        let jsonString = '';
+
+        // Determine if it looks like an array or object
+        // If we expect an array (insights list), favor brackets
+        if (firstOpenBracket !== -1 && lastCloseBracket !== -1 && lastCloseBracket > firstOpenBracket) {
+            jsonString = text.substring(firstOpenBracket, lastCloseBracket + 1);
+            try { return JSON.parse(jsonString); } catch (e) {
+                console.error('Failed to parse array JSON candidate:', e);
+            }
+        }
+
+        if (firstOpenBrace !== -1 && lastCloseBrace !== -1 && lastCloseBrace > firstOpenBrace) {
+            jsonString = text.substring(firstOpenBrace, lastCloseBrace + 1);
+            try { return JSON.parse(jsonString); } catch (e) {
+                console.error('Failed to parse object JSON candidate:', e);
+            }
+        }
+
+        // 3. Fallback: try parsing the cleaned text
+        text = text.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+        return JSON.parse(text);
+    } catch (error) {
+        console.error('JSON Parsing failed completely:', error);
         return [];
     }
 }
@@ -62,48 +80,50 @@ export async function generateHRInsights(
     startDate: Date,
     endDate: Date
 ): Promise<InsightGenerationResult> {
-    // Fetch Slack messages for sentiment
+    // Fetch Slack messages for sentiment - NO LIMIT
     const slackActivities = await Activity.find({
         orgId,
         source: 'slack',
         activityType: 'message',
         timestamp: { $gte: startDate, $lte: endDate }
-    }).limit(50).lean();
+    }).lean();
 
-    // Extract message texts
-    const messageTexts = slackActivities
-        .map(a => a.metadata?.text as string)
-        .filter(t => t && t.length > 10);
-
-    // Batch sentiment analysis -  Simple mock for now to verify pipeline, or single calls.
-    // Gemini 2.0 Flash is fast, we can do parallel calls.
-    const sentiments = await Promise.all(messageTexts.slice(0, 5).map(async (text) => {
-        const prompt = `Classify sentiment: "${text}". JSON: {"score": -1 to 1, "label": "positive"|"neutral"|"negative"}`;
-        try {
-            const res = await generateCompletion([{ role: 'user', content: prompt }], { temperature: 0.1 });
-            const json = JSON.parse(res);
-            return { score: json.score || 0, label: json.label || 'neutral' };
-        } catch {
-            return { score: 0, label: 'neutral' };
+    // Group by User for HR
+    const userActivities: Record<string, any[]> = {};
+    slackActivities.forEach((activity: any) => {
+        const user = activity.actorEmail || activity.actorName || 'Unknown';
+        if (!userActivities[user]) {
+            userActivities[user] = [];
         }
-    }));
+        // Send raw activity data
+        userActivities[user].push(activity);
+    });
 
-    const avgSentiment = sentiments.length > 0
-        ? sentiments.reduce((s, p) => s + p.score, 0) / sentiments.length
-        : 0;
+    // Prepare raw data JSON
+    const activityData = JSON.stringify({
+        context: "HR_INSIGHTS",
+        grouping: "BY_USER",
+        period: { start: startDate, end: endDate },
+        total_activities: slackActivities.length,
+        users: userActivities
+    }, null, 2);
 
-    // Build data summary with more context
-    const dataSummary = `
-- Slack Messages Analyzed: ${slackActivities.length}
-- Average Sentiment Score: ${avgSentiment.toFixed(2)} (-1 to 1 scale)
-- Negative Messages: ${sentiments.filter(s => s.label === 'negative').length}
-- Active Users: ${[...new Set(slackActivities.map(a => a.actorEmail))].slice(0, 5).join(', ')}
-- Sample Topics: ${messageTexts.slice(0, 3).map(t => `"${t.substring(0, 40)}..."`).join(', ')}
-- Period: ${startDate.toISOString().split('T')[0]} to ${endDate.toISOString().split('T')[0]}
-`;
+    // Calculate basic sentiment stats for response metadata (optional, keep existing logic if needed or derive from LLM)
+    // For now, keeping the simple sentiment calc for the return value, 
+    // but the LLM gets the raw text.
+
+    // Quick sentiment pass for the return object (not for LLM context, LLM gets raw)
+    const messageTexts = slackActivities
+        .map((a: any) => a.metadata?.text as string)
+        .filter(t => t && t.length > 2);
+
+    const avgSentiment = 0; // Placeholder as we are focusing on LLM insights
 
     // Generate insights
-    const prompt = INSIGHT_GENERATION_PROMPT.replace('{dataSummary}', dataSummary);
+    console.log(`[HR] Generating insights for ${Object.keys(userActivities).length} users. Raw Data Length: ${activityData.length}`);
+    if (activityData.length > 100000) console.warn('[HR] Warning: Activity data is very large.');
+
+    const prompt = INSIGHT_GENERATION_PROMPT.replace('{activityData}', activityData);
 
     const response = await generateCompletion([
         { role: 'system', content: SYSTEM_PROMPTS.hr },
@@ -154,7 +174,7 @@ export async function generateProductInsights(
     startDate: Date,
     endDate: Date
 ): Promise<InsightGenerationResult> {
-    // Fetch Jira activities
+    // Fetch Jira activities - NO LIMIT
     const jiraActivities = await Activity.find({
         orgId,
         source: 'jira',
@@ -162,49 +182,31 @@ export async function generateProductInsights(
         timestamp: { $gte: startDate, $lte: endDate }
     }).lean();
 
-    const ticketCreated = jiraActivities.filter(a => a.activityType === 'ticket_created');
-    const statusChanges = jiraActivities.filter(a => a.activityType === 'status_change');
-    const resolved = statusChanges.filter(s =>
-        s.metadata?.toStatus?.toLowerCase().includes('done') ||
-        s.metadata?.toStatus?.toLowerCase().includes('closed')
-    );
+    // Group by Project (Tech view)
+    // Since we are already filtering by project, we just wrap it.
+    // If we want multiple projects, we'd group. Here it's specific to one project ID.
+    const projectActivities = {
+        [projectId]: jiraActivities
+    };
 
-    // Extract comments from metadata
-    const comments = jiraActivities
-        .map(a => a.metadata?.comment as string)
-        .filter(c => c && c.length > 5)
-        .slice(0, 5);
+    // Prepare raw data JSON
+    const activityData = JSON.stringify({
+        context: "PRODUCT_INSIGHTS",
+        grouping: "BY_PROJECT",
+        period: { start: startDate, end: endDate },
+        total_activities: jiraActivities.length,
+        projects: projectActivities
+    }, null, 2);
 
-    const prompt = JIRA_ANALYSIS_PROMPT
-        .replace('{total}', String(ticketCreated.length))
-        .replace('{resolved}', String(resolved.length))
-        .replace('{unresolved}', String(ticketCreated.length - resolved.length))
-        .replace('{blocked}', String(statusChanges.filter(s => s.metadata?.toStatus?.toLowerCase().includes('blocked')).length))
-        .replace('{avgResTime}', '48') // Placeholder
-        .replace('{comments}', comments.join(' | ') || 'No comments');
+    const insightPrompt = INSIGHT_GENERATION_PROMPT.replace('{activityData}', activityData);
 
-    const response = await generateCompletion([
-        { role: 'system', content: SYSTEM_PROMPTS.product },
-        { role: 'user', content: prompt }
-    ], { temperature: 0.5 });
+    console.log(`[Product] Generating insights for project ${projectId}. Raw Data Length: ${activityData.length}`);
+    if (jiraActivities.length === 0) {
+        console.warn(`[Product] WARNING: No Jira activities found for project ${projectId}. Context will be empty.`);
+    }
 
-    let jiraAnalysis = { ticketSentiment: 0, efficiencyScore: 50, blockerRisk: 'medium', summary: '' };
-    try {
-        jiraAnalysis = JSON.parse(response);
-    } catch { }
+    const jiraAnalysis = { ticketSentiment: 0, blockerRisk: 'low' };
 
-    // Generate main insights
-    const dataSummary = `
-- Project: ${projectId}
-- Tickets Created: ${ticketCreated.length}
-- Tickets Resolved: ${resolved.length}
-- Ticket Sentiment: ${jiraAnalysis.ticketSentiment}
-- Blocker Risk: ${jiraAnalysis.blockerRisk}
-- Blocked Items Count: ${statusChanges.filter(s => s.metadata?.toStatus?.toLowerCase().includes('blocked')).length}
-- Sample Ticket Titles: ${ticketCreated.map(t => t.metadata?.title).slice(0, 3).join(', ')}
-`;
-
-    const insightPrompt = INSIGHT_GENERATION_PROMPT.replace('{dataSummary}', dataSummary);
     const insightResponse = await generateCompletion([
         { role: 'system', content: SYSTEM_PROMPTS.product },
         { role: 'user', content: insightPrompt }
@@ -252,7 +254,7 @@ export async function generateEngineeringInsights(
     startDate: Date,
     endDate: Date
 ): Promise<InsightGenerationResult> {
-    // Fetch GitHub activities
+    // Fetch GitHub activities - NO LIMIT
     const githubActivities = await Activity.find({
         orgId,
         source: 'github',
@@ -260,53 +262,29 @@ export async function generateEngineeringInsights(
         timestamp: { $gte: startDate, $lte: endDate }
     }).lean();
 
-    const commits = githubActivities.filter(a => a.activityType === 'commit');
-    const prs = githubActivities.filter(a => a.activityType === 'pull_request');
-    const reviews = githubActivities.filter(a => a.activityType === 'review');
-    const merged = prs.filter(p => p.metadata?.merged || p.metadata?.prState === 'merged');
+    // Group by Project (Tech view)
+    const projectActivities = {
+        [projectId]: githubActivities
+    };
 
-    // Extract review comments
-    const reviewComments = reviews
-        .map(r => r.metadata?.body as string)
-        .filter(b => b && b.length > 5)
-        .slice(0, 5);
+    // Prepare raw data JSON
+    const activityData = JSON.stringify({
+        context: "ENGINEERING_INSIGHTS",
+        grouping: "BY_PROJECT",
+        period: { start: startDate, end: endDate },
+        total_activities: githubActivities.length,
+        projects: projectActivities
+    }, null, 2);
 
-    const commitMessages = commits
-        .map(c => c.metadata?.message as string)
-        .filter(m => m && m.length > 5)
-        .slice(0, 5);
+    const insightPrompt = INSIGHT_GENERATION_PROMPT.replace('{activityData}', activityData);
 
-    const prompt = GITHUB_ANALYSIS_PROMPT
-        .replace('{prCount}', String(prs.length))
-        .replace('{merged}', String(merged.length))
-        .replace('{avgReviewTime}', '12') // Placeholder
-        .replace('{reviewComments}', reviewComments.join(' | ') || 'No comments')
-        .replace('{commitMessages}', commitMessages.join(' | ') || 'No messages');
+    console.log(`[Engineering] Generating insights for project ${projectId}. Raw Data Length: ${activityData.length}`);
+    if (githubActivities.length === 0) {
+        console.warn(`[Engineering] WARNING: No GitHub activities found for project ${projectId}. Context will be empty.`);
+    }
 
-    const response = await generateCompletion([
-        { role: 'system', content: SYSTEM_PROMPTS.engineering },
-        { role: 'user', content: prompt }
-    ], { temperature: 0.5 });
-
-    let githubAnalysis = { reviewFriction: 0.5, velocityHealth: 'moderate', cultureScore: 50, summary: '' };
-    try {
-        githubAnalysis = JSON.parse(response);
-    } catch { }
-
-    // Generate main insights
-    const dataSummary = `
-- Project: ${projectId}
-- Commits: ${commits.length}
-- PRs: ${prs.length}
-- Merged: ${merged.length}
-- Reviews: ${reviews.length}
-- Review Friction: ${githubAnalysis.reviewFriction}
-- Culture Score: ${githubAnalysis.cultureScore}
-- Active Contributors: ${[...new Set(commits.map(c => c.actorEmail).concat(prs.map(p => p.actorEmail)))].slice(0, 5).join(', ')}
-- Recent Commit Messages: ${commitMessages.slice(0, 3).join(', ')}
-`;
-
-    const insightPrompt = INSIGHT_GENERATION_PROMPT.replace('{dataSummary}', dataSummary);
+    // Placeholder values for legacy return structure
+    const githubAnalysis = { reviewFriction: 0, cultureScore: 0 };
     const insightResponse = await generateCompletion([
         { role: 'system', content: SYSTEM_PROMPTS.engineering },
         { role: 'user', content: insightPrompt }

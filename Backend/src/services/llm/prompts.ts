@@ -32,12 +32,13 @@ Focus on:
 Output insights for product managers. Highlight risks and opportunities.`
 };
 
-export const INSIGHT_GENERATION_PROMPT = `Based on the following engineering activity data, generate insights.
+export const INSIGHT_GENERATION_PROMPT = `Based on the following raw activity data, generate insights.
+The data is provided in JSON format. Analyze the patterns, timestamps, and metadata directly.
 
-Data Summary:
-{dataSummary}
+Activity Data:
+{activityData}
 
-Generate 2-4 insights in this JSON format:
+Generate 5-7 insights in this JSON format:
 [
   {
     "category": "observation|anomaly|trend|suggestion",
@@ -57,7 +58,9 @@ IMPORTANT:
 5. Generate between 5 to 7 unique, actionable insights.
 6. Use strict categories: "observation", "anomaly", "trend", "suggestion", "risk", "praise", "workload", "process".
 7. Be specific about the data points (e.g., mention specific tickets or users).
-8. Do NOT include comments (// or /* */) in the JSON. Return standard JSON only.`;
+8. Do NOT include comments (// or /* */) in the JSON. Return standard JSON only.
+9. Do NOT modify the input data; use it exactly as provided to find patterns.
+10. Consider the entire dataset provided without filtering.`;
 
 export const SENTIMENT_ANALYSIS_PROMPT = `Analyze the emotional tone of these messages from an engineering team context.
 

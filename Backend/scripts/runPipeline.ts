@@ -38,17 +38,18 @@ const run = async () => {
 
     console.log('\n--- Generating Insights for Project Alpha ---');
     const orgId = 'acme-corp';
-    const alphaId = 'acme-corp/alpha-repo'; // Using alias as ID for now
+    const alphaRepo = 'acme-corp/alpha-repo';
+    const alphaJira = 'ALPHA';
     const startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // Last 30 days
     const endDate = new Date();
 
     try {
-        console.log('Generating Product Insights...');
-        const productInsights = await generateProductInsights(orgId, alphaId, startDate, endDate);
+        console.log('Generating Product Insights (Jira: ALPHA)...');
+        const productInsights = await generateProductInsights(orgId, alphaJira, startDate, endDate);
         console.log('Product Insights:', JSON.stringify(productInsights, null, 2));
 
-        console.log('Generating Engineering Insights...');
-        const engInsights = await generateEngineeringInsights(orgId, alphaId, startDate, endDate);
+        console.log('Generating Engineering Insights (GitHub: acme-corp/alpha-repo)...');
+        const engInsights = await generateEngineeringInsights(orgId, alphaRepo, startDate, endDate);
         console.log('Engineering Insights:', JSON.stringify(engInsights, null, 2));
 
     } catch (err) {
@@ -56,11 +57,12 @@ const run = async () => {
     }
 
     console.log('\n--- Generating Insights for Project Beta ---');
-    const betaId = 'acme-corp/beta-backend';
+    const betaRepo = 'acme-corp/beta-backend';
+    const betaJira = 'BETA';
 
     try {
-        console.log('Generating Product Insights...');
-        const productInsights = await generateProductInsights(orgId, betaId, startDate, endDate);
+        console.log('Generating Product Insights (Jira: BETA)...');
+        const productInsights = await generateProductInsights(orgId, betaJira, startDate, endDate);
         console.log('Product Insights:', JSON.stringify(productInsights, null, 2));
     } catch (err) {
         console.error('Error generating Beta insights:', err);
