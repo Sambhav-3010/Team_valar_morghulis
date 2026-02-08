@@ -32,7 +32,7 @@ export type Project = {
 
 export type AIInsight = {
   id: string;
-  category: 'observation' | 'anomaly' | 'trend' | 'suggestion';
+  category: 'observation' | 'anomaly' | 'trend' | 'suggestion' | 'risk' | 'praise' | 'workload' | 'process';
   persona: 'hr' | 'engineering' | 'product' | 'all';
   title: string;
   body: string;

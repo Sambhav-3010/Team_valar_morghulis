@@ -40,7 +40,7 @@ const run = async () => {
     const orgId = 'valar-morghulis';
     const phoenixId = 'org/project-phoenix'; // Using alias as ID for now based on transformer logic
     const startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // Last 30 days
-    const endDate = new Date();
+    const endDate = new Date(); 
 
     try {
         console.log('Generating Product Insights...');

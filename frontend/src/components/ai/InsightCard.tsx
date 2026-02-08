@@ -1,7 +1,7 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { Lightbulb, AlertTriangle, TrendingUp, Sparkles, ExternalLink } from 'lucide-react';
+import { Lightbulb, AlertTriangle, TrendingUp, Sparkles, ExternalLink, ShieldAlert, Award, BarChart2, GitMerge } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { AIInsight } from '@/data/mock';
 
@@ -33,6 +33,34 @@ const categoryConfig = {
     bg: 'bg-violet-dim',
     border: 'border-l-violet/30',
     label: 'Suggestion',
+  },
+  risk: {
+    icon: ShieldAlert,
+    color: 'text-rose',
+    bg: 'bg-rose-dim',
+    border: 'border-l-rose/30',
+    label: 'Risk',
+  },
+  praise: {
+    icon: Award,
+    color: 'text-emerald-400',
+    bg: 'bg-emerald-400/10',
+    border: 'border-l-emerald-400/30',
+    label: 'Praise',
+  },
+  workload: {
+    icon: BarChart2,
+    color: 'text-blue-400',
+    bg: 'bg-blue-400/10',
+    border: 'border-l-blue-400/30',
+    label: 'Workload',
+  },
+  process: {
+    icon: GitMerge,
+    color: 'text-orange-400',
+    bg: 'bg-orange-400/10',
+    border: 'border-l-orange-400/30',
+    label: 'Process',
   },
 };
 

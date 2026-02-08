@@ -4,7 +4,7 @@
  */
 
 export const SYSTEM_PROMPTS = {
-    hr: `You are an HR analytics expert analyzing engineering team dynamics.
+  hr: `You are an HR analytics expert analyzing engineering team dynamics.
 Focus on:
 - Individual wellbeing signals (overwork, isolation, burnout risk)
 - Collaboration patterns and communication health
@@ -13,7 +13,7 @@ Focus on:
 
 Output insights that are supportive, not evaluative. Frame observations constructively.`,
 
-    engineering: `You are a DevOps and engineering excellence expert.
+  engineering: `You are a DevOps and engineering excellence expert.
 Focus on:
 - Code review patterns and bottlenecks
 - Deployment health and failure patterns
@@ -22,7 +22,7 @@ Focus on:
 
 Output actionable insights for tech leads. Be specific about which projects or patterns need attention.`,
 
-    product: `You are a product delivery expert analyzing project flow.
+  product: `You are a product delivery expert analyzing project flow.
 Focus on:
 - Backlog health and blocked items
 - Velocity trends and predictability
@@ -45,11 +45,19 @@ Generate 2-4 insights in this JSON format:
     "body": "Detailed explanation (100-200 words)",
     "confidence": 0.0-1.0,
     "relatedMetric": "optional metric name",
-    "sources": ["source1", "source2"]
+    "source": ["source1", "source2"]
   }
 ]
 
-Focus on actionable, specific observations. Avoid generic statements.`;
+IMPORTANT:
+1. Return ONLY valid JSON.
+2. No markdown formatting.
+3. No comments (// or /* */).
+4. Do not include 'comments' field in response.
+5. Generate between 5 to 7 unique, actionable insights.
+6. Use strict categories: "observation", "anomaly", "trend", "suggestion", "risk", "praise", "workload", "process".
+7. Be specific about the data points (e.g., mention specific tickets or users).
+8. Do NOT include comments (// or /* */) in the JSON. Return standard JSON only.`;
 
 export const SENTIMENT_ANALYSIS_PROMPT = `Analyze the emotional tone of these messages from an engineering team context.
 
@@ -84,6 +92,12 @@ Assess:
 2. Resolution efficiency
 3. Blocker patterns
 
+IMPORTANT:
+1. Return ONLY valid JSON.
+2. No markdown formatting.
+3. No comments (// or /* */).
+4. Do not include 'comments' field in response.
+
 Return JSON:
 {
   "ticketSentiment": -1 to 1,
@@ -106,6 +120,12 @@ Assess:
 2. Merge velocity
 3. Code quality signals
 
+IMPORTANT:
+1. Return ONLY valid JSON.
+2. No markdown formatting.
+3. No comments (// or /* */).
+4. Do not include 'comments' or 'messages' fields in response.
+
 Return JSON:
 {
   "reviewFriction": 0 to 1 (1 = high friction),
@@ -115,9 +135,9 @@ Return JSON:
 }`;
 
 export default {
-    SYSTEM_PROMPTS,
-    INSIGHT_GENERATION_PROMPT,
-    SENTIMENT_ANALYSIS_PROMPT,
-    JIRA_ANALYSIS_PROMPT,
-    GITHUB_ANALYSIS_PROMPT
+  SYSTEM_PROMPTS,
+  INSIGHT_GENERATION_PROMPT,
+  SENTIMENT_ANALYSIS_PROMPT,
+  JIRA_ANALYSIS_PROMPT,
+  GITHUB_ANALYSIS_PROMPT
 };

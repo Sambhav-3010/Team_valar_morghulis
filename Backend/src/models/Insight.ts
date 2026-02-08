@@ -13,7 +13,7 @@ export interface IInsight extends Document {
     relatedMetric?: string;         // e.g., "SPACE - Satisfaction"
     relatedProjectId?: string;      // Project context
     relatedEmail?: string;          // Person context
-    sources: string[];              // e.g., ["Slack", "GitHub"]
+    source: string[];               // e.g., ["Slack", "GitHub"]
     generatedAt: Date;
     expiresAt?: Date;               // Optional TTL for insights
     createdAt: Date;
@@ -25,8 +25,8 @@ const InsightSchema = new Schema<IInsight>(
         orgId: { type: String, required: true, index: true },
         category: {
             type: String,
-            required: true,
-            enum: ['observation', 'anomaly', 'trend', 'suggestion']
+            enum: ['observation', 'anomaly', 'trend', 'suggestion', 'risk', 'praise', 'workload', 'process'],
+            required: true
         },
         persona: {
             type: String,
@@ -39,7 +39,7 @@ const InsightSchema = new Schema<IInsight>(
         relatedMetric: { type: String },
         relatedProjectId: { type: String, index: true },
         relatedEmail: { type: String, index: true },
-        sources: [{ type: String }],
+        source: [{ type: String }],
         generatedAt: { type: Date, required: true, default: Date.now },
         expiresAt: { type: Date }
     },

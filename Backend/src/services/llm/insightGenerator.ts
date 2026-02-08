@@ -9,13 +9,49 @@ export interface InsightGenerationResult {
         body: string;
         confidence: number;
         relatedMetric?: string;
-        sources: string[];
+        source: string[];
     }>;
     sentimentData?: {
         slack?: { overallSentiment: number; stressLevel: string };
         jira?: { ticketSentiment: number; blockerRisk: string };
         github?: { reviewFriction: number; cultureScore: number };
     };
+}
+
+/**
+ * Helper to extract JSON from LLM response
+ */
+function extractJSON(text: string): any {
+    // Remove comments (single line // and multi-line /* */)
+    const storedText = text;
+    text = text.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+
+    try {
+        // 1. Try direct parse
+        return JSON.parse(text);
+    } catch {
+        // 2. Try extracting from markdown code blocks
+        const match = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+        if (match) {
+            try { return JSON.parse(match[1]); } catch { }
+        }
+        // 3. Try finding array brackets
+        const start = text.indexOf('[');
+        const end = text.lastIndexOf(']');
+        if (start !== -1 && end !== -1 && end > start) {
+            try { return JSON.parse(text.substring(start, end + 1)); } catch { }
+        }
+        // 4. Try finding object braces
+        const startObj = text.indexOf('{');
+        const endObj = text.lastIndexOf('}');
+        if (startObj !== -1 && endObj !== -1 && endObj > startObj) {
+            try { return JSON.parse(text.substring(startObj, endObj + 1)); } catch { }
+        }
+        // Fallback: try parsing the original text just in case comment stripping broke something (unlikely but safe)
+        try { return JSON.parse(storedText); } catch { }
+
+        return [];
+    }
 }
 
 /**
@@ -39,17 +75,30 @@ export async function generateHRInsights(
         .map(a => a.metadata?.text as string)
         .filter(t => t && t.length > 10);
 
-    // Batch sentiment analysis
-    const sentiments = await batchAnalyzeSentiment(messageTexts.slice(0, 10));
+    // Batch sentiment analysis -  Simple mock for now to verify pipeline, or single calls.
+    // Gemini 2.0 Flash is fast, we can do parallel calls.
+    const sentiments = await Promise.all(messageTexts.slice(0, 5).map(async (text) => {
+        const prompt = `Classify sentiment: "${text}". JSON: {"score": -1 to 1, "label": "positive"|"neutral"|"negative"}`;
+        try {
+            const res = await generateCompletion([{ role: 'user', content: prompt }], { temperature: 0.1 });
+            const json = JSON.parse(res);
+            return { score: json.score || 0, label: json.label || 'neutral' };
+        } catch {
+            return { score: 0, label: 'neutral' };
+        }
+    }));
+
     const avgSentiment = sentiments.length > 0
         ? sentiments.reduce((s, p) => s + p.score, 0) / sentiments.length
         : 0;
 
-    // Build data summary
+    // Build data summary with more context
     const dataSummary = `
 - Slack Messages Analyzed: ${slackActivities.length}
 - Average Sentiment Score: ${avgSentiment.toFixed(2)} (-1 to 1 scale)
 - Negative Messages: ${sentiments.filter(s => s.label === 'negative').length}
+- Active Users: ${[...new Set(slackActivities.map(a => a.actorEmail))].slice(0, 5).join(', ')}
+- Sample Topics: ${messageTexts.slice(0, 3).map(t => `"${t.substring(0, 40)}..."`).join(', ')}
 - Period: ${startDate.toISOString().split('T')[0]} to ${endDate.toISOString().split('T')[0]}
 `;
 
@@ -61,12 +110,13 @@ export async function generateHRInsights(
         { role: 'user', content: prompt }
     ], { temperature: 0.7 });
 
+
     let insights: InsightGenerationResult['insights'] = [];
-    try {
-        insights = JSON.parse(response);
-        if (!Array.isArray(insights)) insights = [];
-    } catch {
-        insights = [];
+    const parsed = extractJSON(response);
+    if (Array.isArray(parsed)) {
+        insights = parsed;
+    } else if (parsed && Array.isArray(parsed.insights)) {
+        insights = parsed.insights; // Handle case where it wraps in { "insights": [...] }
     }
 
     // Save insights to DB
@@ -79,7 +129,7 @@ export async function generateHRInsights(
             body: insight.body,
             confidence: insight.confidence || 0.5,
             relatedMetric: insight.relatedMetric,
-            sources: insight.sources || ['Slack'],
+            source: insight.source || ['Slack'],
             generatedAt: new Date()
         });
     }
@@ -150,6 +200,8 @@ export async function generateProductInsights(
 - Tickets Resolved: ${resolved.length}
 - Ticket Sentiment: ${jiraAnalysis.ticketSentiment}
 - Blocker Risk: ${jiraAnalysis.blockerRisk}
+- Blocked Items Count: ${statusChanges.filter(s => s.metadata?.toStatus?.toLowerCase().includes('blocked')).length}
+- Sample Ticket Titles: ${ticketCreated.map(t => t.metadata?.title).slice(0, 3).join(', ')}
 `;
 
     const insightPrompt = INSIGHT_GENERATION_PROMPT.replace('{dataSummary}', dataSummary);
@@ -175,7 +227,7 @@ export async function generateProductInsights(
             confidence: insight.confidence || 0.5,
             relatedMetric: insight.relatedMetric,
             relatedProjectId: projectId,
-            sources: insight.sources || ['Jira'],
+            source: insight.source || ['Jira'],
             generatedAt: new Date()
         });
     }
@@ -250,6 +302,8 @@ export async function generateEngineeringInsights(
 - Reviews: ${reviews.length}
 - Review Friction: ${githubAnalysis.reviewFriction}
 - Culture Score: ${githubAnalysis.cultureScore}
+- Active Contributors: ${[...new Set(commits.map(c => c.actorEmail).concat(prs.map(p => p.actorEmail)))].slice(0, 5).join(', ')}
+- Recent Commit Messages: ${commitMessages.slice(0, 3).join(', ')}
 `;
 
     const insightPrompt = INSIGHT_GENERATION_PROMPT.replace('{dataSummary}', dataSummary);
@@ -275,7 +329,7 @@ export async function generateEngineeringInsights(
             confidence: insight.confidence || 0.5,
             relatedMetric: insight.relatedMetric,
             relatedProjectId: projectId,
-            sources: insight.sources || ['GitHub'],
+            source: insight.source || ['GitHub'],
             generatedAt: new Date()
         });
     }
