@@ -4,6 +4,7 @@ import cookieParser from "cookie-parser";
 import mongoose from "mongoose";
 import passport from "./utils/passport";
 import authRoutes from "./routes/auth";
+import analyticsRoutes from "./routes/analytics";
 import dotenv from "dotenv";
 dotenv.config();
 
@@ -23,9 +24,10 @@ app.use(cookieParser());
 app.use(passport.initialize());
 
 app.use("/auth", authRoutes);
+app.use("/api/analytics", analyticsRoutes);
 
 app.get("/", (req, res) => {
-  res.send("Hello, World!");
+  res.send("Golden Data Layer Backend - Analytics API Ready");
 });
 
 mongoose
