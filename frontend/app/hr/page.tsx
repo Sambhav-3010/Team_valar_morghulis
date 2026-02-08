@@ -14,6 +14,7 @@ import { fetchHRData, fetchEmployees, fetchIdentities, type Insight } from '@/li
 import { cn } from '@/lib/utils';
 import { useChartColors } from '@/hooks/useThemeColors';
 import { Loader2, AlertTriangle, RefreshCw } from 'lucide-react';
+import { MemberActivityModal } from '@/components/modals/MemberActivityModal';
 
 const wellbeingColors: Record<string, { color: string; bg: string }> = {
   balanced: { color: 'text-emerald', bg: 'bg-emerald-dim' },
@@ -39,6 +40,7 @@ export default function HRPage() {
   const [spaceMetrics, setSpaceMetrics] = useState<any>(defaultMetrics);
   const [people, setPeople] = useState<any[]>([]);
   const [identities, setIdentities] = useState<any[]>([]);
+  const [selectedMember, setSelectedMember] = useState<any | null>(null);
   const chartColors = useChartColors();
 
   const loadData = async () => {
@@ -154,6 +156,12 @@ export default function HRPage() {
 
   return (
     <div className="max-w-[1400px] mx-auto">
+      <MemberActivityModal
+        isOpen={!!selectedMember}
+        onClose={() => setSelectedMember(null)}
+        user={selectedMember}
+      />
+
       <PageHeader
         title="People & Culture"
         description="Understand team dynamics, collaboration health, and wellbeing signals using the SPACE framework. These insights are designed to support, not evaluate."
@@ -324,14 +332,17 @@ export default function HRPage() {
         </>
       )}
 
-
-
       {people.length > 0 && (
         <>
           <SectionHeader title="Team Members" subtitle={`${people.length} unified profiles with activity metrics`} />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-12">
             {people.map((person: any, i: number) => (
-              <PersonCard key={person.id || i} person={person} delay={i} />
+              <PersonCard
+                key={person.id || i}
+                person={person}
+                delay={i}
+                onClick={() => setSelectedMember(person)}
+              />
             ))}
           </div>
         </>

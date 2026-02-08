@@ -146,7 +146,8 @@ export async function triggerInsightGeneration(orgId?: string, projectId?: strin
     });
 }
 
-export async function triggerTransformation(): Promise<any> {
-    return fetchAPI('/api/v2/transform/run', { method: 'POST' });
+export async function fetchUserActivities(email: string): Promise<{ success: boolean; activities: any[] }> {
+    if (!email) return { success: false, activities: [] };
+    return fetchAPI(`/api/analytics/user/${encodeURIComponent(email)}/activities?limit=50`);
 }
 

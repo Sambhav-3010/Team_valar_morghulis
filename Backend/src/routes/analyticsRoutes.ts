@@ -129,4 +129,40 @@ router.get('/insights', async (req, res) => {
     }
 });
 
+/**
+ * GET /api/analytics/user/:email/activities
+ * Returns recent activities for a specific user
+ */
+router.get('/user/:email/activities', async (req, res) => {
+    try {
+        const { email } = req.params;
+        const { limit } = req.query;
+        const limitNum = limit ? parseInt(limit as string, 10) : 50;
+
+        // Import Activity model dynamically or ensure it's imported at top
+        const { Activity } = await import('../models/Activity');
+
+        const activities = await Activity.find({
+            actorEmail: email
+        })
+            .sort({ timestamp: -1 })
+            .limit(limitNum);
+
+        res.json({
+            success: true,
+            activities: activities.map(a => ({
+                id: a._id,
+                source: a.source,
+                type: a.activityType,
+                timestamp: a.timestamp,
+                project: a.projectAlias,
+                metadata: a.metadata
+            }))
+        });
+    } catch (err) {
+        console.error('Error fetching user activities:', err);
+        res.status(500).json({ error: 'Failed to fetch user activities' });
+    }
+});
+
 export default router;

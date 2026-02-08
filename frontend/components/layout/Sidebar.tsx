@@ -41,7 +41,7 @@ export function Sidebar() {
   return (
     <motion.aside
       className={cn(
-        'fixed left-0 top-0 bottom-0 z-40 flex flex-col',
+        'fixed left-0 top-0 bottom-0 z-4 flex flex-col',
         'bg-surface-0 border-r border-border-subtle',
         'transition-all duration-300 ease-out',
       )}

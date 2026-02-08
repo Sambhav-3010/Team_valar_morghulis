@@ -15,9 +15,10 @@ const activityConfig = {
 interface PersonCardProps {
   person: Person;
   delay?: number;
+  onClick?: () => void;
 }
 
-export function PersonCard({ person, delay = 0 }: PersonCardProps) {
+export function PersonCard({ person, delay = 0, onClick }: PersonCardProps) {
   const activity = activityConfig[person.activityLevel] || activityConfig.balanced;
   const scoreColor = useHealthColor(person.spaceScore || 50);
 
@@ -26,7 +27,11 @@ export function PersonCard({ person, delay = 0 }: PersonCardProps) {
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5, delay: delay * 0.06, ease: [0.23, 1, 0.32, 1] }}
-      className="card card-interactive p-5"
+      onClick={onClick}
+      className={cn(
+        "card card-interactive p-5 bg-surface-1 border border-border-subtle hover:bg-surface-2 transition-colors cursor-pointer",
+        onClick && "active:scale-[0.98]"
+      )}
     >
       <div className="flex items-start gap-3">
         {/* Avatar */}

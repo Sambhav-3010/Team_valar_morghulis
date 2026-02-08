@@ -10,7 +10,7 @@ export function Topbar() {
   const [searchFocused, setSearchFocused] = useState(false);
 
   return (
-    <header className="sticky top-0 z-30 h-16 flex items-center justify-between px-8 bg-surface-0/80 backdrop-blur-xl border-b border-border-subtle">
+    <header className="sticky top-0 z-11 h-16 flex items-center justify-between px-8 bg-surface backdrop-blur-xl border-b border-border-subtle">
       {/* Search */}
       <div className="flex-1 max-w-md">
         <div
