@@ -1,13 +1,5 @@
 import OpenAI from 'openai';
 
-/**
- * Featherless AI Provider
- * OpenAI-compatible API wrapper for Featherless AI
- * 
- * Base URL: https://api.featherless.ai/v1
- * Set FEATHERLESS_API_KEY in environment
- */
-
 const FEATHERLESS_BASE_URL = 'https://api.featherless.ai/v1';
 const DEFAULT_MODEL = 'meta-llama/Meta-Llama-3.1-8B-Instruct';
 
@@ -38,9 +30,7 @@ export interface CompletionOptions {
     maxTokens?: number;
 }
 
-/**
- * Generate a chat completion using Featherless AI
- */
+
 export async function generateCompletion(
     messages: ChatMessage[],
     options: CompletionOptions = {}

@@ -14,7 +14,7 @@ const AttachmentSchema = new mongoose.Schema({
     url: String
 }, { _id: false });
 
-const InsightSchema = new mongoose.Schema({
+const SlackMessageSchema = new mongoose.Schema({
     eventId: String,
     teamId: String,
     userId: String,
@@ -30,8 +30,8 @@ const InsightSchema = new mongoose.Schema({
 });
 
 // Get or create the model
-const Insight = mongoose.models.Insight ||
-    mongoose.model('Insight', InsightSchema);
+const SlackMessage = mongoose.models.SlackMessage ||
+    mongoose.model('SlackMessage', SlackMessageSchema);
 
 export interface TransformResult {
     processed: number;
@@ -67,7 +67,7 @@ export async function transformSlackMessages(
         }
 
         // Fetch slack messages
-        const messages = await Insight.find(query).lean();
+        const messages = await SlackMessage.find(query).lean();
         result.processed = messages.length;
 
         for (const message of messages) {
