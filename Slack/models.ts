@@ -50,4 +50,24 @@ const SlackMessageSchema: Schema = new Schema({
     createdAt: { type: Date, default: Date.now }
 });
 
+export interface ISlackAuth extends Document {
+    teamId: string;
+    teamName: string;
+    accessToken: string;
+    botUserId: string;
+    installerUserId: string;
+    installedAt: Date;
+}
+
+const SlackAuthSchema: Schema = new Schema({
+    teamId: { type: String, required: true, unique: true },
+    teamName: { type: String },
+    accessToken: { type: String, required: true },
+    botUserId: { type: String },
+    installerUserId: { type: String },
+    installedAt: { type: Date, default: Date.now }
+});
+
+export const SlackAuth = mongoose.model<ISlackAuth>("SlackAuth", SlackAuthSchema);
+
 export const SlackMessage = mongoose.model<ISlackMessage>("SlackMessage", SlackMessageSchema);

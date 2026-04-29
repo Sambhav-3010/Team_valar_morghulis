@@ -1,0 +1,71 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:latest
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+
+  backend:
+    build: ./Backend
+    ports:
+      - "7000:7000"
+    environment:
+      - MONGODB_URI=mongodb://mongodb:27017/pulseiq
+      - PORT=7000
+    depends_on:
+      - mongodb
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:7000
+    depends_on:
+      - backend
+
+  slack-service:
+    build: ./Slack
+    ports:
+      - "3001:3001"
+    environment:
+      - MONGODB_URI=mongodb://mongodb:27017/pulseiq
+      - PORT=3001
+      - SLACK_CLIENT_ID=${SLACK_CLIENT_ID}
+      - SLACK_CLIENT_SECRET=${SLACK_CLIENT_SECRET}
+      - SLACK_REDIRECT_URI=${SLACK_REDIRECT_URI}
+    depends_on:
+      - mongodb
+
+  jira-service:
+    build: ./JIRA
+    ports:
+      - "3002:3002"
+    environment:
+      - MONGODB_URI=mongodb://mongodb:27017/pulseiq
+    depends_on:
+      - mongodb
+
+  github-service:
+    build: ./githubapp
+    ports:
+      - "3003:3003"
+    environment:
+      - MONGODB_URI=mongodb://mongodb:27017/pulseiq
+    depends_on:
+      - mongodb
+
+  email-service:
+    build: ./Email
+    ports:
+      - "3004:3004"
+    environment:
+      - MONGODB_URI=mongodb://mongodb:27017/pulseiq
+    depends_on:
+      - mongodb
+
+volumes:
+  mongodb_data:

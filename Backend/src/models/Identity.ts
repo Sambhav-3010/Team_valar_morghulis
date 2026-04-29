@@ -8,6 +8,7 @@ export interface IIdentity extends Document {
     slackUserId?: string;           // Slack user ID
     slackTeamId?: string;           // Slack workspace ID
     jiraAccountId?: string;         // Jira account ID
+    aliases: string[];              // Any other identifiers (github login, slack id, etc)
     displayName: string;            // Friendly display name
     orgId: string;                  // Organization reference
     defaultProjectId?: string;      // Primary project assignment
@@ -35,6 +36,7 @@ const IdentitySchema = new Schema<IIdentity>(
         slackUserId: { type: String, index: true },
         slackTeamId: { type: String },
         jiraAccountId: { type: String, index: true },
+        aliases: [{ type: String, index: true }],
         displayName: { type: String, required: true },
         orgId: { type: String, required: true, index: true },
         defaultProjectId: { type: String, index: true }

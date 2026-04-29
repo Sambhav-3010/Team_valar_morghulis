@@ -180,14 +180,89 @@ export async function findIdentityByAccount(options: {
     if (options.jiraAccountId) {
         conditions.push({ jiraAccountId: options.jiraAccountId });
     }
+    
+    // Also check aliases array for any of the IDs
+    const ids = [options.githubLogin, options.slackUserId, options.jiraAccountId].filter(Boolean);
+    if (ids.length > 0) {
+        conditions.push({ aliases: { $in: ids } });
+    }
 
     if (conditions.length === 0) return null;
 
     return Identity.findOne({ $or: conditions });
 }
 
+/**
+ * Resolve or create an identity based on various platform IDs or email
+ */
+export async function resolveOrCreateIdentity(data: {
+    email?: string;
+    displayName?: string;
+    githubLogin?: string;
+    slackUserId?: string;
+    jiraAccountId?: string;
+    orgId?: string;
+}): Promise<IIdentity> {
+    const orgId = data.orgId || 'default';
+    
+    // 1. Try to find existing identity by any of the provided IDs
+    const existing = await findIdentityByAccount({
+        email: data.email,
+        githubLogin: data.githubLogin,
+        slackUserId: data.slackUserId,
+        jiraAccountId: data.jiraAccountId
+    });
+
+    if (existing) {
+        // Update existing identity with new information if it was missing
+        let changed = false;
+        if (data.githubLogin && !existing.githubLogin) {
+            existing.githubLogin = data.githubLogin;
+            changed = true;
+        }
+        if (data.slackUserId && !existing.slackUserId) {
+            existing.slackUserId = data.slackUserId;
+            changed = true;
+        }
+        if (data.jiraAccountId && !existing.jiraAccountId) {
+            existing.jiraAccountId = data.jiraAccountId;
+            changed = true;
+        }
+        if (changed) await existing.save();
+        return existing;
+    }
+
+    // 2. If not found and we have an email, use findOrCreateIdentity
+    if (data.email) {
+        const identity = await findOrCreateIdentity(data.email, data.displayName || data.email.split('@')[0], orgId);
+        
+        // Link additional accounts if provided
+        if (data.githubLogin) identity.githubLogin = data.githubLogin;
+        if (data.slackUserId) identity.slackUserId = data.slackUserId;
+        if (data.jiraAccountId) identity.jiraAccountId = data.jiraAccountId;
+        
+        if (data.githubLogin || data.slackUserId || data.jiraAccountId) {
+            await identity.save();
+        }
+        return identity;
+    }
+
+    // 3. Last resort: Create a new identity with whatever we have
+    const newIdentity = await Identity.create({
+        primaryEmail: data.email || `${data.githubLogin || data.slackUserId || 'unknown'}-${Date.now()}@placeholder.ai`,
+        displayName: data.displayName || data.githubLogin || data.slackUserId || 'Unknown User',
+        githubLogin: data.githubLogin,
+        slackUserId: data.slackUserId,
+        jiraAccountId: data.jiraAccountId,
+        orgId
+    });
+
+    return newIdentity;
+}
+
 export default {
     findOrCreateIdentity,
+    resolveOrCreateIdentity,
     resolveIdentity,
     linkGitHubAccount,
     linkSlackAccount,

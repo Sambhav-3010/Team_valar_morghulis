@@ -146,8 +146,19 @@ export async function triggerInsightGeneration(orgId?: string, projectId?: strin
     });
 }
 
-export async function fetchUserActivities(email: string): Promise<{ success: boolean; activities: any[] }> {
-    if (!email) return { success: false, activities: [] };
-    return fetchAPI(`/api/analytics/user/${encodeURIComponent(email)}/activities?limit=50`);
+export async function runSync(orgId: string): Promise<{ success: boolean; message: string }> {
+    return fetchAPI('/api/analytics/transform/run', {
+        method: 'POST',
+        body: JSON.stringify({ orgId }),
+    });
+}
+
+export async function fetchOrgs(): Promise<string[]> {
+    try {
+        const response = await fetchAPI<{ success: boolean; orgs: string[] }>('/api/analytics/orgs');
+        return response.orgs || ['acme-corp'];
+    } catch (err) {
+        return ['acme-corp'];
+    }
 }
 

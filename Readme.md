@@ -1,4 +1,5 @@
-# Engineering Intelligence Platform (Team Valar Morghulis)
+# Engineering Intelligence Platform (PulseIQ
+Insights)
 
 An AI-powered platform for engineering analytics, aggregating data from development tools (GitHub, Jira), communication channels (Slack, Email), and providing actionable insights for engineering leaders.
 

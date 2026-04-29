@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 import { AppShell } from '@/components/layout/AppShell';
 import { ThemeProvider } from '@/components/providers/ThemeProvider';
+import { OrgProvider } from '@/components/providers/OrgProvider';
 
 export const metadata: Metadata = {
   title: 'PulseIQ — AI-Driven Enterprise Intelligence',
@@ -24,7 +25,9 @@ export default function RootLayout({
       </head>
       <body className="antialiased">
         <ThemeProvider>
-          <AppShell>{children}</AppShell>
+          <OrgProvider>
+            <AppShell>{children}</AppShell>
+          </OrgProvider>
         </ThemeProvider>
       </body>
     </html>

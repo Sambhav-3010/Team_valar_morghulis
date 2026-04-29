@@ -18,6 +18,8 @@ import { MetricCard } from '@/components/shared/MetricCard';
 import { InsightCard } from '@/components/ai/InsightCard';
 import { InsightStream } from '@/components/ai/InsightStream';
 import { fetchHRData, fetchProductData, fetchEngineeringData, fetchInsights, type Insight } from '@/lib/api';
+import { useOrg } from '@/components/providers/OrgProvider';
+import { SyncButton } from '@/components/shared/SyncButton';
 
 interface MetricsData {
   space: {
@@ -38,6 +40,7 @@ interface MetricsData {
 }
 
 export default function OverviewPage() {
+  const { selectedOrg } = useOrg();
   const [loading, setLoading] = useState(true);
   const [insights, setInsights] = useState<Insight[]>([]);
   const [metrics, setMetrics] = useState<MetricsData>({
@@ -47,71 +50,71 @@ export default function OverviewPage() {
   });
   const [insightCount, setInsightCount] = useState(0);
 
-  useEffect(() => {
-    async function loadData() {
-      setLoading(true);
+  async function loadData() {
+    setLoading(true);
 
-      try {
-        const hrData = await fetchHRData();
-        if (hrData?.metrics) {
-          setMetrics(prev => ({
-            ...prev,
-            space: {
-              satisfaction: hrData.metrics.satisfaction?.current || 0,
-              performance: hrData.metrics.performance?.current || 0,
-              activity: hrData.metrics.activity?.current || 0,
-            }
-          }));
-        }
-      } catch (err) {
-        console.error('Failed to fetch HR data:', err);
+    try {
+      const hrData = await fetchHRData();
+      if (hrData?.metrics) {
+        setMetrics(prev => ({
+          ...prev,
+          space: {
+            satisfaction: hrData.metrics.satisfaction?.current || 0,
+            performance: hrData.metrics.performance?.current || 0,
+            activity: hrData.metrics.activity?.current || 0,
+          }
+        }));
       }
-
-      try {
-        const productData = await fetchProductData();
-        if (productData?.metrics) {
-          setMetrics(prev => ({
-            ...prev,
-            flow: {
-              velocity: productData.metrics.flowVelocity?.current || 0,
-              efficiency: productData.metrics.flowEfficiency?.current || 0,
-              time: productData.metrics.flowTime?.current || 0,
-            }
-          }));
-        }
-      } catch (err) {
-        console.error('Failed to fetch product data:', err);
-      }
-
-      try {
-        const engData = await fetchEngineeringData();
-        if (engData?.metrics) {
-          setMetrics(prev => ({
-            ...prev,
-            dora: {
-              deploymentFrequency: engData.metrics.deploymentFrequency?.current || 0,
-              leadTime: engData.metrics.leadTime?.current || 0,
-              changeFailureRate: engData.metrics.changeFailureRate?.current || 0,
-            }
-          }));
-        }
-      } catch (err) {
-        console.error('Failed to fetch engineering data:', err);
-      }
-
-      try {
-        const allInsights = await fetchInsights(undefined, 10);
-        setInsights(allInsights.slice(0, 3));
-        setInsightCount(allInsights.length);
-      } catch (err) {
-        console.error('Failed to fetch insights:', err);
-      }
-
-      setLoading(false);
+    } catch (err) {
+      console.error('Failed to fetch HR data:', err);
     }
 
+    try {
+      const productData = await fetchProductData();
+      if (productData?.metrics) {
+        setMetrics(prev => ({
+          ...prev,
+          flow: {
+            velocity: productData.metrics.flowVelocity?.current || 0,
+            efficiency: productData.metrics.flowEfficiency?.current || 0,
+            time: productData.metrics.flowTime?.current || 0,
+          }
+        }));
+      }
+    } catch (err) {
+      console.error('Failed to fetch product data:', err);
+    }
+
+    try {
+      const engData = await fetchEngineeringData();
+      if (engData?.metrics) {
+        setMetrics(prev => ({
+          ...prev,
+          dora: {
+            deploymentFrequency: engData.metrics.deploymentFrequency?.current || 0,
+            leadTime: engData.metrics.leadTime?.current || 0,
+            changeFailureRate: engData.metrics.changeFailureRate?.current || 0,
+          }
+        }));
+      }
+    } catch (err) {
+      console.error('Failed to fetch engineering data:', err);
+    }
+
+    try {
+      const allInsights = await fetchInsights(undefined, 10);
+      setInsights(allInsights.slice(0, 3));
+      setInsightCount(allInsights.length);
+    } catch (err) {
+      console.error('Failed to fetch insights:', err);
+    }
+
+    setLoading(false);
+  }
+
+  useEffect(() => {
     loadData();
-  }, []);
+  }, [selectedOrg]);
 
   const personaCards = [
     {
@@ -158,7 +161,9 @@ export default function OverviewPage() {
       <PageHeader
         title="Overview"
         description="A unified view across your people, projects, and engineering health. AI insights surface what needs your attention."
-      />
+      >
+        <SyncButton orgId={selectedOrg} onSyncComplete={loadData} />
+      </PageHeader>
 
       <div className="mb-10">
         <InsightStream message={summaryMessage} typing />
